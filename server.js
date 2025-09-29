@@ -211,6 +211,13 @@ async function consultarOnTimeCar(cedula, tipoConsulta) {
             
             console.log(`Encontradas ${filas.length} filas`);
 
+            // Contar columnas de la primera fila para debug
+            if (filas.length > 0) {
+                const primeraFila = filas[0].querySelectorAll('td');
+                console.log(`Primera fila tiene ${primeraFila.length} columnas`);
+                console.log(`Primeras 3 celdas:`, Array.from(primeraFila).slice(0, 3).map(c => c.innerText?.trim()));
+            }
+
             return filas.map((fila) => {
                 const celdas = Array.from(fila.querySelectorAll('td'));
                 
@@ -219,7 +226,11 @@ async function consultarOnTimeCar(cedula, tipoConsulta) {
                 const datos = celdas.map(c => c.innerText?.trim() || '');
                 
                 // Mapear datos según las columnas definidas
-                const registro = {};
+                const registro = {
+                    _totalColumnas: datos.length,
+                    _primerasColumnas: datos.slice(0, 3)
+                };
+                
                 columnas.forEach((nombreColumna, index) => {
                     registro[nombreColumna] = datos[index] || '';
                 });
