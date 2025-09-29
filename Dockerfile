@@ -4,11 +4,14 @@ FROM node:18-slim
 # Establece el directorio de trabajo
 WORKDIR /app
 
+# Agregamos una línea para asegurarnos de que el package.json no esté en caché
+ARG CACHE_BUST=1
+
 # Copia los archivos de definición
 COPY package.json package.json
 COPY package-lock.json package-lock.json
 
-# Instala las dependencias (solo express)
+# Instala las dependencias
 RUN npm install
 
 # Copia el código de la aplicación
