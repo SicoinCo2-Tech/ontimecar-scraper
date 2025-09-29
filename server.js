@@ -1,4 +1,4 @@
-// server.js - Scraper OnTimeCar con mapeo correcto por tabla
+// server.js - Scraper OnTimeCar con mapeo correcto de columnas
 const express = require('express');
 const puppeteer = require('puppeteer');
 const app = express();
@@ -25,105 +25,115 @@ const ONTIMECAR_CONFIG = {
     }
 };
 
-// Mapeo de columnas por tipo de consulta
+// Mapeo de columnas por tipo de consulta con columnas a omitir
 const COLUMNAS_POR_TIPO = {
-    preautorizaciones: [
-        'acciones',
-        'fechaEmision',
-        'fechaFinal',
-        'tipoAfiliado',
-        'nombreAfiliado',
-        'clase',
-        'numero',
-        'estado',
-        'codigo',
-        'cantidad',
-        'numeroPrescripcion',
-        'ciudadOrigen',
-        'direccionOrigen',
-        'ciudadDestino',
-        'direccionDestino',
-        'eps',
-        'cantidadServicios',
-        'subirAutorizacion',
-        'observaciones',
-        'nombreAco',
-        'parentesco',
-        'telefonoAco',
-        'tipoDocumentoAco',
-        'numeroDocumentoAco',
-        'agendamientosExistentes'
-    ],
-    agendamiento: [
-        'fechaCita',
-        'identificacionUsuario',
-        'nombreUsuario',
-        'telefonoUsuario',
-        'zona',
-        'ciudadOrigen',
-        'direccionOrigen',
-        'ciudadDestino',
-        'ipsDestino',
-        'numeroAutorizacion',
-        'cantidadServiciosAutorizados',
-        'fechaVigencia',
-        'horaRecogida',
-        'horaRetorno',
-        'nombreAcompanante',
-        'identificacionAcompanante',
-        'parentesco',
-        'telefonoAcompanante',
-        'conductor',
-        'celular',
-        'observaciones',
-        'estado'
-    ],
-    programacion: [
-        'whEnviado',
-        'correoEnviado',
-        'fechaCita',
-        'nombrePaciente',
-        'numeroTelAfiliado',
-        'documento',
-        'ciudadOrigen',
-        'direccionOrigen',
-        'ciudadDestino',
-        'direccionDestino',
-        'horaRecogida',
-        'horaRetorno',
-        'conductor',
-        'eps',
-        'observaciones',
-        'correo',
-        'zona',
-        'autorizacion'
-    ],
-    panel: [
-        'acciones',
-        'fechaSolicitud',
-        'fechaRecepcion',
-        'tipoDocumento',
-        'nombre',
-        'clase',
-        'numero',
-        'estado',
-        'codigo',
-        'cantidad',
-        'prescripcion',
-        'ciudadOrigen',
-        'direccionOrigen',
-        'ciudadDestino',
-        'direccionDestino',
-        'eps',
-        'cantidadServicios',
-        'subirAutorizacion',
-        'observaciones',
-        'nombrePaciente',
-        'parentesco',
-        'telefonoDocumentoAco',
-        'numeroDocumentoAco',
-        'agendamientos'
-    ]
+    agendamiento: {
+        skip: 3, // Omitir 3 columnas iniciales (Menú + 2 fechas del sistema)
+        columnas: [
+            'fechaCita',
+            'identificacionUsuario',
+            'nombreUsuario',
+            'telefonoUsuario',
+            'zona',
+            'ciudadOrigen',
+            'direccionOrigen',
+            'ciudadDestino',
+            'ipsDestino',
+            'numeroAutorizacion',
+            'cantidadServiciosAutorizados',
+            'fechaVigencia',
+            'horaRecogida',
+            'horaRetorno',
+            'nombreAcompanante',
+            'identificacionAcompanante',
+            'parentesco',
+            'telefonoAcompanante',
+            'conductor',
+            'celular',
+            'observaciones',
+            'estado'
+        ]
+    },
+    programacion: {
+        skip: 1, // Omitir columna de acciones
+        columnas: [
+            'whEnviado',
+            'correoEnviado',
+            'fechaCita',
+            'nombrePaciente',
+            'numeroTelAfiliado',
+            'documento',
+            'ciudadOrigen',
+            'direccionOrigen',
+            'ciudadDestino',
+            'direccionDestino',
+            'horaRecogida',
+            'horaRetorno',
+            'conductor',
+            'eps',
+            'observaciones',
+            'correo',
+            'zona',
+            'autorizacion'
+        ]
+    },
+    panel: {
+        skip: 1, // Omitir columna de acciones
+        columnas: [
+            'fechaSolicitud',
+            'fechaRecepcion',
+            'tipoDocumento',
+            'nombre',
+            'clase',
+            'numero',
+            'estado',
+            'codigo',
+            'cantidad',
+            'prescripcion',
+            'ciudadOrigen',
+            'direccionOrigen',
+            'ciudadDestino',
+            'direccionDestino',
+            'eps',
+            'cantidadServicios',
+            'subirAutorizacion',
+            'observaciones',
+            'nombrePaciente',
+            'parentesco',
+            'telefonoDocumentoAco',
+            'numeroDocumentoAco',
+            'agendamientos'
+        ]
+    },
+    preautorizaciones: {
+        skip: 1, // Omitir columna de acciones
+        columnas: [
+            'fechaEmision',
+            'fechaFinal',
+            'tipoAfiliado',
+            'nombreAfiliado',
+            'clase',
+            'numero',
+            'estado',
+            'codigo',
+            'cantidad',
+            'numeroPrescripcion',
+            'ciudadOrigen',
+            'direccionOrigen',
+            'ciudadDestino',
+            'direccionDestino',
+            'eps',
+            'cantidadServicios',
+            'subirAutorizacion',
+            'observaciones',
+            'nombreAco',
+            'parentesco',
+            'telefonoAco',
+            'tipoDocumentoAco',
+            'numeroDocumentoAco',
+            'agendamientosExistentes'
+        ]
+    }
 };
 
 // Función genérica para hacer login y scraping
@@ -191,9 +201,9 @@ async function consultarOnTimeCar(cedula, tipoConsulta) {
         // PASO 3: Extraer datos de la tabla con mapeo correcto
         console.log('[SCRAPER] Extrayendo datos de la tabla...');
         
-        const columnasEsperadas = COLUMNAS_POR_TIPO[tipoConsulta];
+        const configColumnas = COLUMNAS_POR_TIPO[tipoConsulta];
         
-        const servicios = await page.evaluate((columnas) => {
+        const servicios = await page.evaluate((config) => {
             const tablas = [
                 document.querySelector('table tbody'),
                 document.querySelector('.table tbody'),
@@ -211,13 +221,6 @@ async function consultarOnTimeCar(cedula, tipoConsulta) {
             
             console.log(`Encontradas ${filas.length} filas`);
 
-            // Contar columnas de la primera fila para debug
-            if (filas.length > 0) {
-                const primeraFila = filas[0].querySelectorAll('td');
-                console.log(`Primera fila tiene ${primeraFila.length} columnas`);
-                console.log(`Primeras 3 celdas:`, Array.from(primeraFila).slice(0, 3).map(c => c.innerText?.trim()));
-            }
-
             return filas.map((fila) => {
                 const celdas = Array.from(fila.querySelectorAll('td'));
                 
@@ -225,19 +228,18 @@ async function consultarOnTimeCar(cedula, tipoConsulta) {
 
                 const datos = celdas.map(c => c.innerText?.trim() || '');
                 
-                // Mapear datos según las columnas definidas
-                const registro = {
-                    _totalColumnas: datos.length,
-                    _primerasColumnas: datos.slice(0, 3)
-                };
+                // Omitir las primeras N columnas según la configuración
+                const datosRelevantes = datos.slice(config.skip);
                 
-                columnas.forEach((nombreColumna, index) => {
-                    registro[nombreColumna] = datos[index] || '';
+                // Mapear datos según las columnas definidas
+                const registro = {};
+                config.columnas.forEach((nombreColumna, index) => {
+                    registro[nombreColumna] = datosRelevantes[index] || '';
                 });
                 
                 return registro;
             }).filter(servicio => servicio !== null);
-        }, columnasEsperadas);
+        }, configColumnas);
 
         console.log(`[SCRAPER] Se encontraron ${servicios.length} registros en ${tipoConsulta}`);
 
@@ -248,7 +250,8 @@ async function consultarOnTimeCar(cedula, tipoConsulta) {
             tipo: tipoConsulta,
             cedula: cedula,
             total: servicios.length,
-            columnas: columnasEsperadas,
+            columnas: configColumnas.columnas,
+            columnasOmitidas: configColumnas.skip,
             servicios: servicios,
             mensaje: servicios.length > 0 
                 ? `Se encontraron ${servicios.length} registro(s) en ${tipoConsulta} para la cédula ${cedula}`
@@ -277,8 +280,8 @@ app.get('/health', (req, res) => {
     res.json({
         status: 'ok',
         mensaje: 'Servidor OnTimeCar Scraper funcionando correctamente',
-        version: '3.1.0',
-        tipo: 'Scraper Multi-Endpoint con Mapeo Correcto',
+        version: '3.2.0',
+        tipo: 'Scraper Multi-Endpoint con Skip de Columnas',
         endpoints_disponibles: Object.keys(ONTIMECAR_CONFIG.endpoints),
         timestamp: new Date().toISOString()
     });
@@ -416,10 +419,29 @@ app.get('/columnas/:tipo', (req, res) => {
             tipos_disponibles: Object.keys(COLUMNAS_POR_TIPO)
         });
     }
+    const config = COLUMNAS_POR_TIPO[tipo];
     res.json({
         tipo: tipo,
-        columnas: COLUMNAS_POR_TIPO[tipo],
-        total: COLUMNAS_POR_TIPO[tipo].length
+        columnasOmitidas: config.skip,
+        columnas: config.columnas,
+        totalColumnas: config.columnas.length,
+        descripcion: `Se omiten las primeras ${config.skip} columna(s) de la tabla HTML`
+    });
+});
+
+// Endpoint para ver todas las configuraciones
+app.get('/columnas', (req, res) => {
+    const configuraciones = {};
+    Object.keys(COLUMNAS_POR_TIPO).forEach(tipo => {
+        configuraciones[tipo] = {
+            columnasOmitidas: COLUMNAS_POR_TIPO[tipo].skip,
+            columnas: COLUMNAS_POR_TIPO[tipo].columnas,
+            totalColumnas: COLUMNAS_POR_TIPO[tipo].columnas.length
+        };
+    });
+    res.json({
+        mensaje: 'Configuración de columnas por tipo de consulta',
+        configuraciones: configuraciones
     });
 });
 
@@ -427,8 +449,9 @@ app.get('/columnas/:tipo', (req, res) => {
 app.get('/', (req, res) => {
     res.json({
         servicio: 'OnTimeCar Scraper API',
-        version: '3.1.0',
-        tipo: 'Scraper Multi-Endpoint con Mapeo Correcto',
+        version: '3.2.0',
+        tipo: 'Scraper Multi-Endpoint con Skip de Columnas',
+        descripcion: 'Sistema de scraping con mapeo correcto de columnas HTML',
         endpoints: {
             health: 'GET /health',
             agendamiento: 'GET /consulta/agendamiento?cedula=NUMERO',
@@ -436,9 +459,17 @@ app.get('/', (req, res) => {
             panel: 'GET /consulta/panel?cedula=NUMERO',
             preautorizaciones: 'GET /consulta/preautorizaciones?cedula=NUMERO',
             consulta_post: 'POST /consulta (body: { "cedula": "NUMERO", "tipo": "agendamiento|programacion|panel|preautorizaciones" })',
-            ver_columnas: 'GET /columnas/:tipo (preautorizaciones|agendamiento|programacion|panel)'
+            ver_columnas: 'GET /columnas/:tipo (preautorizaciones|agendamiento|programacion|panel)',
+            ver_todas_columnas: 'GET /columnas'
         },
-        documentacion: 'Consulta el estado de servicios de On Time Car por cédula en diferentes secciones'
+        documentacion: 'Consulta el estado de servicios de On Time Car por cédula en diferentes secciones',
+        caracteristicas: [
+            'Mapeo automático de columnas por tipo de tabla',
+            'Skip de columnas de sistema (acciones, menú, etc)',
+            'Soporte para múltiples endpoints',
+            'Validación de parámetros',
+            'Logging detallado'
+        ]
     });
 });
 
@@ -454,6 +485,7 @@ app.use((req, res) => {
             '/consulta/programacion',
             '/consulta/panel',
             '/consulta/preautorizaciones',
+            '/columnas',
             '/columnas/:tipo'
         ]
     });
@@ -461,15 +493,24 @@ app.use((req, res) => {
 
 // Iniciar servidor
 app.listen(PORT, '0.0.0.0', () => {
-    console.log(`✅ Servidor OnTimeCar Scraper iniciado correctamente`);
-    console.log(`📡 Escuchando en puerto ${PORT}`);
-    console.log(`🌐 Endpoints disponibles:`);
+    console.log(`\n${'='.repeat(60)}`);
+    console.log(`✅ Servidor OnTimeCar Scraper v3.2.0 iniciado correctamente`);
+    console.log(`${'='.repeat(60)}`);
+    console.log(`📡 Puerto: ${PORT}`);
+    console.log(`🔐 Usuario: ${ONTIMECAR_CONFIG.username}`);
+    console.log(`\n📋 Configuración de columnas:`);
+    Object.keys(COLUMNAS_POR_TIPO).forEach(tipo => {
+        const config = COLUMNAS_POR_TIPO[tipo];
+        console.log(`   ${tipo.padEnd(20)} → Skip: ${config.skip}, Columnas: ${config.columnas.length}`);
+    });
+    console.log(`\n🌐 Endpoints disponibles:`);
     console.log(`   - GET  /health`);
     console.log(`   - GET  /consulta/agendamiento?cedula=NUMERO`);
     console.log(`   - GET  /consulta/programacion?cedula=NUMERO`);
     console.log(`   - GET  /consulta/panel?cedula=NUMERO`);
     console.log(`   - GET  /consulta/preautorizaciones?cedula=NUMERO`);
     console.log(`   - POST /consulta (body con cedula y tipo)`);
-    console.log(`   - GET  /columnas/:tipo (ver mapeo de columnas)`);
-    console.log(`🔐 Credenciales configuradas: ${ONTIMECAR_CONFIG.username}`);
+    console.log(`   - GET  /columnas (ver todas las configuraciones)`);
+    console.log(`   - GET  /columnas/:tipo (ver configuración específica)`);
+    console.log(`${'='.repeat(60)}\n`);
 });
