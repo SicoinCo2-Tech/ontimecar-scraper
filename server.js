@@ -196,12 +196,46 @@ async function consultarOnTimeCar(cedula, tipoConsulta) {
 
         console.log(`[SCRAPER] Login exitoso. Navegando a ${tipoConsulta}...`);
 
-        // PASO 2: Navegar a la página específica con filtro de cédula
-        const urlConsulta = `${ONTIMECAR_CONFIG.endpoints[tipoConsulta]}?page=1&length=100&start_date=&end_date=&search=${cedula}`;
-        await page.goto(urlConsulta, { 
+        // PASO 2: Navegar a la página específica
+        const urlBase = ONTIMECAR_CONFIG.endpoints[tipoConsulta];
+        await page.goto(urlBase, { 
             waitUntil: 'networkidle2',
             timeout: 30000 
         });
+
+        console.log('[SCRAPER] Esperando a que cargue la página...');
+        await page.waitForTimeout(2000);
+
+        // PASO 3: Buscar el campo de búsqueda y filtrar por cédula
+        console.log(`[SCRAPER] Buscando campo de búsqueda para filtrar por: ${cedula}`);
+        
+        try {
+            // Intentar encontrar el campo de búsqueda (común en DataTables)
+            const searchSelector = 'input[type="search"], input.form-control[placeholder*="Buscar"], input[aria-controls]';
+            await page.waitForSelector(searchSelector, { timeout: 5000 });
+            
+            // Limpiar y escribir en el campo de búsqueda
+            await page.evaluate((selector) => {
+                const input = document.querySelector(selector);
+                if (input) input.value = '';
+            }, searchSelector);
+            
+            await page.type(searchSelector, cedula, { delay: 100 });
+            console.log('[SCRAPER] Cédula ingresada en campo de búsqueda');
+            
+            // Esperar a que la tabla se actualice
+            await page.waitForTimeout(2000);
+            
+        } catch (e) {
+            console.log('[SCRAPER] No se encontró campo de búsqueda, intentando con URL...');
+            // Si no hay campo de búsqueda, intentar con parámetro URL
+            const urlConsulta = `${urlBase}?search=${cedula}`;
+            await page.goto(urlConsulta, { 
+                waitUntil: 'networkidle2',
+                timeout: 30000 
+            });
+            await page.waitForTimeout(2000);
+        }
 
         console.log('[SCRAPER] Esperando a que cargue la tabla...');
         await page.waitForTimeout(3000);
@@ -212,12 +246,12 @@ async function consultarOnTimeCar(cedula, tipoConsulta) {
             console.log('[SCRAPER] No se encontró tabla con los selectores estándar');
         }
 
-        // PASO 3: Extraer datos de la tabla con mapeo correcto
+        // PASO 4: Extraer datos de la tabla con mapeo correcto
         console.log('[SCRAPER] Extrayendo datos de la tabla...');
         
         const configColumnas = COLUMNAS_POR_TIPO[tipoConsulta];
         
-        const servicios = await page.evaluate((config) => {
+        const servicios = await page.evaluate((config, cedulaBuscada) => {
             const tablas = [
                 document.querySelector('table tbody'),
                 document.querySelector('.table tbody'),
@@ -233,12 +267,16 @@ async function consultarOnTimeCar(cedula, tipoConsulta) {
             const tbody = tablas[0];
             const filas = Array.from(tbody.querySelectorAll('tr'));
             
-            console.log(`Encontradas ${filas.length} filas`);
+            console.log(`Encontradas ${filas.length} filas en total`);
 
             return filas.map((fila) => {
                 const celdas = Array.from(fila.querySelectorAll('td'));
                 
                 if (celdas.length === 0) return null;
+
+                // Verificar si el texto de la fila contiene la cédula buscada
+                const textoFila = Array.from(celdas).map(c => c.innerText?.trim() || '').join(' ');
+                const contieneCedula = textoFila.includes(cedulaBuscada);
 
                 const datos = celdas.map(c => c.innerText?.trim() || '');
                 
@@ -246,14 +284,19 @@ async function consultarOnTimeCar(cedula, tipoConsulta) {
                 const datosRelevantes = datos.slice(config.skip);
                 
                 // Mapear datos según las columnas definidas
-                const registro = {};
+                const registro = {
+                    _contieneCedula: contieneCedula,
+                    _totalColumnas: datos.length,
+                    _datosCompletos: datos
+                };
+                
                 config.columnas.forEach((nombreColumna, index) => {
                     registro[nombreColumna] = datosRelevantes[index] || '';
                 });
                 
                 return registro;
             }).filter(servicio => servicio !== null);
-        }, configColumnas);
+        }, configColumnas, cedula);
 
         console.log(`[SCRAPER] Se encontraron ${servicios.length} registros en ${tipoConsulta}`);
 
