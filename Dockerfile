@@ -34,10 +34,10 @@ ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
 # Copiar archivos de dependencias
-COPY package*.json ./
+COPY package.json ./
 
 # Instalar dependencias
-RUN npm ci --only=production
+RUN npm install --omit=dev
 
 # Copiar código de la aplicación
 COPY server.js ./
