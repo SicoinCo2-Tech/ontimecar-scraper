@@ -1,4 +1,4 @@
-// server.js - Scraper OnTimeCar con múltiples endpoints y mapeo correcto
+// server.js - Scraper OnTimeCar con mapeo correcto por tabla
 const express = require('express');
 const puppeteer = require('puppeteer');
 const app = express();
@@ -25,106 +25,105 @@ const ONTIMECAR_CONFIG = {
     }
 };
 
-// Mapeos de columnas para cada tipo de consulta
-const MAPEOS = {
-    agendamiento: (datos) => ({
-        acciones: datos[0] || '',
-        fechaEmision: datos[1] || '',
-        fechaFinal: datos[2] || '',
-        tipoAfiliado: datos[3] || '',
-        nombreAfiliado: datos[4] || '',
-        clase: datos[5] || '',
-        numero: datos[6] || '',
-        estado: datos[7] || '',
-        codigo: datos[8] || '',
-        cantidad: datos[9] || '',
-        prescripcion: datos[10] || '',
-        ciudadOrigen: datos[11] || '',
-        dirOrigen: datos[12] || '',
-        ciudadDestino: datos[13] || '',
-        direccionDestino: datos[14] || '',
-        eps: datos[15] || '',
-        cantidadServicios: datos[16] || '',
-        subirAutorizacion: datos[17] || '',
-        observaciones: datos[18] || '',
-        nombreAco: datos[19] || '',
-        parentesco: datos[20] || '',
-        telefonoAco: datos[21] || '',
-        tipoDocumentoAco: datos[22] || '',
-        numeroDocumentoAco: datos[23] || '',
-        agendamientosExistentes: datos[24] || ''
-    }),
-    panel: (datos) => ({
-        fechaCita: datos[0] || '',
-        identificacionUsuario: datos[1] || '',
-        nombreUsuario: datos[2] || '',
-        telefonoUsuario: datos[3] || '',
-        zona: datos[4] || '',
-        ciudadOrigen: datos[5] || '',
-        direccionOrigen: datos[6] || '',
-        ciudadDestino: datos[7] || '',
-        ipsDestino: datos[8] || '',
-        numeroAutorizacion: datos[9] || '',
-        cantidadServiciosAutorizados: datos[10] || '',
-        fechaVigencia: datos[11] || '',
-        horaRecogida: datos[12] || '',
-        horaRetorno: datos[13] || '',
-        nombreAcompanante: datos[14] || '',
-        identificacionAcompanante: datos[15] || '',
-        parentesco: datos[16] || '',
-        telefonoAcompanante: datos[17] || '',
-        conductor: datos[18] || '',
-        celular: datos[19] || '',
-        observaciones: datos[20] || '',
-        estado: datos[21] || ''
-    }),
-    programacion: (datos) => ({
-        whEnviado: datos[0] || '',
-        correoEnviado: datos[1] || '',
-        fechaCita: datos[2] || '',
-        nombrePaciente: datos[3] || '',
-        numeroTelAfiliado: datos[4] || '',
-        documento: datos[5] || '',
-        ciudadOrigen: datos[6] || '',
-        dirOrigen: datos[7] || '',
-        ciudadDestino: datos[8] || '',
-        dirDestino: datos[9] || '',
-        horaRecogida: datos[10] || '',
-        horaRetorno: datos[11] || '',
-        conductor: datos[12] || '',
-        eps: datos[13] || '',
-        observaciones: datos[14] || '',
-        correo: datos[15] || '',
-        zona: datos[16] || '',
-        autorizacion: datos[17] || ''
-    }),
-    preautorizaciones: (datos) => ({
-        acciones: datos[0] || '',
-        fechaEmision: datos[1] || '',
-        fechaFinal: datos[2] || '',
-        tipoAfiliado: datos[3] || '',
-        nombreAfiliado: datos[4] || '',
-        clase: datos[5] || '',
-        numero: datos[6] || '',
-        estado: datos[7] || '',
-        codigo: datos[8] || '',
-        cantidad: datos[9] || '',
-        prescripcion: datos[10] || '',
-        ciudadOrigen: datos[11] || '',
-        dirOrigen: datos[12] || '',
-        ciudadDestino: datos[13] || '',
-        direccionDestino: datos[14] || '',
-        eps: datos[15] || '',
-        cantidadServicios: datos[16] || '',
-        subirAutorizacion: datos[17] || '',
-        observaciones: datos[18] || '',
-        nombreAco: datos[19] || '',
-        parentesco: datos[20] || '',
-        telefonoAco: datos[21] || '',
-        tipoDocumentoAco: datos[22] || '',
-        numeroDocumentoAco: datos[23] || '',
-        agendamientosExistentes: datos[24] || ''
-    })
+// Mapeo de columnas por tipo de consulta
+const COLUMNAS_POR_TIPO = {
+    preautorizaciones: [
+        'acciones',
+        'fechaEmision',
+        'fechaFinal',
+        'tipoAfiliado',
+        'nombreAfiliado',
+        'clase',
+        'numero',
+        'estado',
+        'codigo',
+        'cantidad',
+        'numeroPrescripcion',
+        'ciudadOrigen',
+        'direccionOrigen',
+        'ciudadDestino',
+        'direccionDestino',
+        'eps',
+        'cantidadServicios',
+        'subirAutorizacion',
+        'observaciones',
+        'nombreAco',
+        'parentesco',
+        'telefonoAco',
+        'tipoDocumentoAco',
+        'numeroDocumentoAco',
+        'agendamientosExistentes'
+    ],
+    agendamiento: [
+        'fechaCita',
+        'identificacionUsuario',
+        'nombreUsuario',
+        'telefonoUsuario',
+        'zona',
+        'ciudadOrigen',
+        'direccionOrigen',
+        'ciudadDestino',
+        'ipsDestino',
+        'numeroAutorizacion',
+        'cantidadServiciosAutorizados',
+        'fechaVigencia',
+        'horaRecogida',
+        'horaRetorno',
+        'nombreAcompanante',
+        'identificacionAcompanante',
+        'parentesco',
+        'telefonoAcompanante',
+        'conductor',
+        'celular',
+        'observaciones',
+        'estado'
+    ],
+    programacion: [
+        'whEnviado',
+        'correoEnviado',
+        'fechaCita',
+        'nombrePaciente',
+        'numeroTelAfiliado',
+        'documento',
+        'ciudadOrigen',
+        'direccionOrigen',
+        'ciudadDestino',
+        'direccionDestino',
+        'horaRecogida',
+        'horaRetorno',
+        'conductor',
+        'eps',
+        'observaciones',
+        'correo',
+        'zona',
+        'autorizacion'
+    ],
+    panel: [
+        'acciones',
+        'fechaSolicitud',
+        'fechaRecepcion',
+        'tipoDocumento',
+        'nombre',
+        'clase',
+        'numero',
+        'estado',
+        'codigo',
+        'cantidad',
+        'prescripcion',
+        'ciudadOrigen',
+        'direccionOrigen',
+        'ciudadDestino',
+        'direccionDestino',
+        'eps',
+        'cantidadServicios',
+        'subirAutorizacion',
+        'observaciones',
+        'nombrePaciente',
+        'parentesco',
+        'telefonoDocumentoAco',
+        'numeroDocumentoAco',
+        'agendamientos'
+    ]
 };
 
 // Función genérica para hacer login y scraping
@@ -134,10 +133,12 @@ async function consultarOnTimeCar(cedula, tipoConsulta) {
     try {
         console.log(`[SCRAPER] Iniciando consulta ${tipoConsulta} para cédula: ${cedula}`);
         
+        // Validar tipo de consulta
         if (!ONTIMECAR_CONFIG.endpoints[tipoConsulta]) {
             throw new Error(`Tipo de consulta inválido: ${tipoConsulta}`);
         }
         
+        // Lanzar navegador
         browser = await puppeteer.launch({
             headless: 'new',
             args: [
@@ -187,10 +188,12 @@ async function consultarOnTimeCar(cedula, tipoConsulta) {
             console.log('[SCRAPER] No se encontró tabla con los selectores estándar');
         }
 
-        // PASO 3: Extraer datos de la tabla
+        // PASO 3: Extraer datos de la tabla con mapeo correcto
         console.log('[SCRAPER] Extrayendo datos de la tabla...');
         
-        const datosTabla = await page.evaluate(() => {
+        const columnasEsperadas = COLUMNAS_POR_TIPO[tipoConsulta];
+        
+        const servicios = await page.evaluate((columnas) => {
             const tablas = [
                 document.querySelector('table tbody'),
                 document.querySelector('.table tbody'),
@@ -210,18 +213,20 @@ async function consultarOnTimeCar(cedula, tipoConsulta) {
 
             return filas.map((fila) => {
                 const celdas = Array.from(fila.querySelectorAll('td'));
+                
                 if (celdas.length === 0) return null;
-                return celdas.map(c => c.innerText?.trim() || '');
-            }).filter(fila => fila !== null && fila.length > 0);
-        });
 
-        // Aplicar el mapeo correcto según el tipo de consulta
-        const mapeoFuncion = MAPEOS[tipoConsulta];
-        const servicios = datosTabla.map(fila => mapeoFuncion(fila)).filter(s => {
-            // Filtrar filas vacías
-            const valores = Object.values(s);
-            return valores.some(v => v && v.trim() !== '');
-        });
+                const datos = celdas.map(c => c.innerText?.trim() || '');
+                
+                // Mapear datos según las columnas definidas
+                const registro = {};
+                columnas.forEach((nombreColumna, index) => {
+                    registro[nombreColumna] = datos[index] || '';
+                });
+                
+                return registro;
+            }).filter(servicio => servicio !== null);
+        }, columnasEsperadas);
 
         console.log(`[SCRAPER] Se encontraron ${servicios.length} registros en ${tipoConsulta}`);
 
@@ -232,7 +237,8 @@ async function consultarOnTimeCar(cedula, tipoConsulta) {
             tipo: tipoConsulta,
             cedula: cedula,
             total: servicios.length,
-            registros: servicios,
+            columnas: columnasEsperadas,
+            servicios: servicios,
             mensaje: servicios.length > 0 
                 ? `Se encontraron ${servicios.length} registro(s) en ${tipoConsulta} para la cédula ${cedula}`
                 : `No se encontraron registros en ${tipoConsulta} para la cédula ${cedula}`
@@ -267,7 +273,7 @@ app.get('/health', (req, res) => {
     });
 });
 
-// Endpoint: Agendamiento (Autorizaciones)
+// Endpoint: Agendamiento
 app.get('/consulta/agendamiento', async (req, res) => {
     try {
         const cedula = req.query.cedula;
@@ -355,7 +361,7 @@ app.get('/consulta/preautorizaciones', async (req, res) => {
     }
 });
 
-// Endpoint POST genérico
+// Endpoint POST genérico (acepta tipo en el body)
 app.post('/consulta', async (req, res) => {
     try {
         const { cedula, tipo } = req.body;
@@ -389,6 +395,23 @@ app.post('/consulta', async (req, res) => {
     }
 });
 
+// Endpoint para ver el mapeo de columnas
+app.get('/columnas/:tipo', (req, res) => {
+    const tipo = req.params.tipo;
+    if (!COLUMNAS_POR_TIPO[tipo]) {
+        return res.status(404).json({
+            error: true,
+            mensaje: `Tipo no encontrado: ${tipo}`,
+            tipos_disponibles: Object.keys(COLUMNAS_POR_TIPO)
+        });
+    }
+    res.json({
+        tipo: tipo,
+        columnas: COLUMNAS_POR_TIPO[tipo],
+        total: COLUMNAS_POR_TIPO[tipo].length
+    });
+});
+
 // Ruta raíz con información del API
 app.get('/', (req, res) => {
     res.json({
@@ -397,19 +420,14 @@ app.get('/', (req, res) => {
         tipo: 'Scraper Multi-Endpoint con Mapeo Correcto',
         endpoints: {
             health: 'GET /health',
-            agendamiento: 'GET /consulta/agendamiento?cedula=NUMERO (Autorizaciones)',
+            agendamiento: 'GET /consulta/agendamiento?cedula=NUMERO',
             programacion: 'GET /consulta/programacion?cedula=NUMERO',
-            panel: 'GET /consulta/panel?cedula=NUMERO (Agendamientos Panel)',
+            panel: 'GET /consulta/panel?cedula=NUMERO',
             preautorizaciones: 'GET /consulta/preautorizaciones?cedula=NUMERO',
-            consulta_post: 'POST /consulta (body: { "cedula": "NUMERO", "tipo": "agendamiento|programacion|panel|preautorizaciones" })'
+            consulta_post: 'POST /consulta (body: { "cedula": "NUMERO", "tipo": "agendamiento|programacion|panel|preautorizaciones" })',
+            ver_columnas: 'GET /columnas/:tipo (preautorizaciones|agendamiento|programacion|panel)'
         },
-        documentacion: 'Consulta el estado de servicios de On Time Car por cédula en diferentes secciones',
-        mapeos_disponibles: {
-            agendamiento: '25 campos (Autorizaciones)',
-            panel: '22 campos (Agendamientos)',
-            programacion: '18 campos',
-            preautorizaciones: '25 campos'
-        }
+        documentacion: 'Consulta el estado de servicios de On Time Car por cédula en diferentes secciones'
     });
 });
 
@@ -424,7 +442,8 @@ app.use((req, res) => {
             '/consulta/agendamiento',
             '/consulta/programacion',
             '/consulta/panel',
-            '/consulta/preautorizaciones'
+            '/consulta/preautorizaciones',
+            '/columnas/:tipo'
         ]
     });
 });
@@ -439,6 +458,7 @@ app.listen(PORT, '0.0.0.0', () => {
     console.log(`   - GET  /consulta/programacion?cedula=NUMERO`);
     console.log(`   - GET  /consulta/panel?cedula=NUMERO`);
     console.log(`   - GET  /consulta/preautorizaciones?cedula=NUMERO`);
-    console.log(`   - POST /consulta`);
-    console.log(`🔐 Credenciales: ${ONTIMECAR_CONFIG.username}`);
+    console.log(`   - POST /consulta (body con cedula y tipo)`);
+    console.log(`   - GET  /columnas/:tipo (ver mapeo de columnas)`);
+    console.log(`🔐 Credenciales configuradas: ${ONTIMECAR_CONFIG.username}`);
 });
