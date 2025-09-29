@@ -287,7 +287,8 @@ async function consultarOnTimeCar(cedula, tipoConsulta) {
                 const registro = {
                     _contieneCedula: contieneCedula,
                     _totalColumnas: datos.length,
-                    _datosCompletos: datos
+                    _primeras10Columnas: datos.slice(0, 10),
+                    _ultimas5Columnas: datos.slice(-5)
                 };
                 
                 config.columnas.forEach((nombreColumna, index) => {
