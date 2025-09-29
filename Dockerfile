@@ -7,11 +7,12 @@ WORKDIR /app
 # Copia los archivos de definición
 COPY package.json package.json
 
-# Instala las dependencias
+# Instala las dependencias. Esto también crea el package-lock.json internamente.
 RUN npm install
 
 # Copia el código de la aplicación
 COPY server.js .
+COPY .dockerignore .
 
 # Expone el puerto que usa la aplicación
 EXPOSE 3000
