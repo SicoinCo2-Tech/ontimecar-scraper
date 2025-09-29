@@ -28,7 +28,7 @@ const ONTIMECAR_CONFIG = {
 // Mapeo de columnas por tipo de consulta con columnas a omitir
 const COLUMNAS_POR_TIPO = {
     agendamiento: {
-        skip: 1, // Omitir 1 columna inicial (columna de acciones/menú)
+        skip: 3, // Omitir: ACCIONES, columna vacía, SMS
         columnas: [
             'fechaCita',
             'identificacionUsuario',
@@ -39,8 +39,8 @@ const COLUMNAS_POR_TIPO = {
             'direccionOrigen',
             'ciudadDestino',
             'ipsDestino',
-            'numeroAutorizacion',
             'cantidadServiciosAutorizados',
+            'numeroAutorizacion',
             'fechaVigencia',
             'horaRecogida',
             'horaRetorno',
@@ -55,9 +55,8 @@ const COLUMNAS_POR_TIPO = {
         ]
     },
     programacion: {
-        skip: 1, // Omitir columna de acciones
+        skip: 1, // Omitir: EXPORTAR
         columnas: [
-            'whEnviado',
             'correoEnviado',
             'fechaCita',
             'nombrePaciente',
@@ -65,52 +64,28 @@ const COLUMNAS_POR_TIPO = {
             'documento',
             'ciudadOrigen',
             'direccionOrigen',
+            'columnaVacia1',
             'ciudadDestino',
             'direccionDestino',
             'horaRecogida',
             'horaRetorno',
             'conductor',
+            'columnaVacia2',
             'eps',
             'observaciones',
+            'columnaVacia3',
             'correo',
+            'columnaVacia4',
             'zona',
             'autorizacion'
         ]
     },
     panel: {
-        skip: 1, // Omitir columna de acciones
-        columnas: [
-            'fechaSolicitud',
-            'fechaRecepcion',
-            'tipoDocumento',
-            'nombre',
-            'clase',
-            'numero',
-            'estado',
-            'codigo',
-            'cantidad',
-            'prescripcion',
-            'ciudadOrigen',
-            'direccionOrigen',
-            'ciudadDestino',
-            'direccionDestino',
-            'eps',
-            'cantidadServicios',
-            'subirAutorizacion',
-            'observaciones',
-            'nombrePaciente',
-            'parentesco',
-            'telefonoDocumentoAco',
-            'numeroDocumentoAco',
-            'agendamientos'
-        ]
-    },
-    preautorizaciones: {
-        skip: 1, // Omitir columna de acciones
+        skip: 1, // Omitir: ACCIONES
         columnas: [
             'fechaEmision',
             'fechaFinal',
-            'tipoAfiliado',
+            'tipoId',
             'nombreAfiliado',
             'clase',
             'numero',
@@ -131,6 +106,38 @@ const COLUMNAS_POR_TIPO = {
             'telefonoAco',
             'tipoDocumentoAco',
             'numeroDocumentoAco',
+            'agendamientosExistentes'
+        ]
+    },
+    preautorizaciones: {
+        skip: 2, // Omitir: ACCIONES, AGENDAMIENTO AUTORIZACIONES
+        columnas: [
+            'fechaEmision',
+            'fechaFinal',
+            'tipoIdAfiliado',
+            'nombreAfiliado',
+            'clase',
+            'columnaVacia1',
+            'numero',
+            'estado',
+            'columnaVacia2',
+            'codigo',
+            'cantidad',
+            'numeroPrescripcion',
+            'ciudadOrigen',
+            'direccionOrigen',
+            'ciudadDestino',
+            'direccionDestino',
+            'cantidadEpsServicios',
+            'subirAutorizacion',
+            'columnaVacia3',
+            'nombreAco',
+            'idAco',
+            'numeroAco',
+            'telefonoAco',
+            'parentesco',
+            'columnaVacia4',
+            'aco',
             'agendamientosExistentes'
         ]
     }
