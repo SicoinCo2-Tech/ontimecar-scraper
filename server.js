@@ -1,4 +1,4 @@
-// server.js - Scraper Real de OnTimeCar con Puppeteer MEJORADO
+// server.js - Scraper OnTimeCar con múltiples endpoints
 const express = require('express');
 const puppeteer = require('puppeteer');
 const app = express();
@@ -15,17 +15,27 @@ app.use((req, res, next) => {
 // Credenciales de OnTimeCar
 const ONTIMECAR_CONFIG = {
     loginUrl: 'https://app.ontimecar.co/app/home/',
-    consultaUrl: 'https://app.ontimecar.co/app/agendamiento/',
     username: 'ANDRES',
-    password: 'IAResponsable'
+    password: 'IAResponsable',
+    endpoints: {
+        agendamiento: 'https://app.ontimecar.co/app/agendamiento/',
+        programacion: 'https://app.ontimecar.co/app/programacion/',
+        panel: 'https://app.ontimecar.co/app/agendamientos_panel/',
+        preautorizaciones: 'https://app.ontimecar.co/app/preautorizaciones/'
+    }
 };
 
-// Función para hacer login y scraping
-async function consultarServiciosOnTimeCar(cedula) {
+// Función genérica para hacer login y scraping
+async function consultarOnTimeCar(cedula, tipoConsulta) {
     let browser = null;
     
     try {
-        console.log(`[SCRAPER] Iniciando consulta para cédula: ${cedula}`);
+        console.log(`[SCRAPER] Iniciando consulta ${tipoConsulta} para cédula: ${cedula}`);
+        
+        // Validar tipo de consulta
+        if (!ONTIMECAR_CONFIG.endpoints[tipoConsulta]) {
+            throw new Error(`Tipo de consulta inválido: ${tipoConsulta}`);
+        }
         
         // Lanzar navegador
         browser = await puppeteer.launch({
@@ -48,37 +58,29 @@ async function consultarServiciosOnTimeCar(cedula) {
             timeout: 30000 
         });
 
-        // Esperar y llenar formulario de login
         console.log('[SCRAPER] Ingresando credenciales...');
         await page.waitForSelector('input[name="username"], input#username, input[type="text"]', { timeout: 10000 });
         
-        // Llenar usuario
         await page.type('input[name="username"], input#username, input[type="text"]', ONTIMECAR_CONFIG.username);
-        
-        // Llenar contraseña
         await page.type('input[name="password"], input#password, input[type="password"]', ONTIMECAR_CONFIG.password);
         
-        // Click en botón de login
         await Promise.all([
             page.click('button[type="submit"], input[type="submit"], button.btn-primary'),
             page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 })
         ]);
 
-        console.log('[SCRAPER] Login exitoso. Navegando a consultas...');
+        console.log(`[SCRAPER] Login exitoso. Navegando a ${tipoConsulta}...`);
 
-        // PASO 2: Navegar a la página de agendamientos con filtro de cédula
-        const urlConsulta = `${ONTIMECAR_CONFIG.consultaUrl}?page=1&length=100&start_date=&end_date=&search=${cedula}`;
+        // PASO 2: Navegar a la página específica con filtro de cédula
+        const urlConsulta = `${ONTIMECAR_CONFIG.endpoints[tipoConsulta]}?page=1&length=100&start_date=&end_date=&search=${cedula}`;
         await page.goto(urlConsulta, { 
             waitUntil: 'networkidle2',
             timeout: 30000 
         });
 
         console.log('[SCRAPER] Esperando a que cargue la tabla...');
-        
-        // Esperar más tiempo para que cargue la tabla con JavaScript
         await page.waitForTimeout(3000);
 
-        // Intentar con múltiples selectores
         try {
             await page.waitForSelector('table tbody tr, .table tbody tr, .dataTable tbody tr', { timeout: 5000 });
         } catch (e) {
@@ -89,7 +91,6 @@ async function consultarServiciosOnTimeCar(cedula) {
         console.log('[SCRAPER] Extrayendo datos de la tabla...');
         
         const servicios = await page.evaluate(() => {
-            // Intentar con diferentes selectores de tabla
             const tablas = [
                 document.querySelector('table tbody'),
                 document.querySelector('.table tbody'),
@@ -110,14 +111,10 @@ async function consultarServiciosOnTimeCar(cedula) {
             return filas.map((fila, index) => {
                 const celdas = Array.from(fila.querySelectorAll('td'));
                 
-                console.log(`Fila ${index}: ${celdas.length} celdas`);
-                
                 if (celdas.length === 0) return null;
 
-                // Extraer texto de cada celda
                 const datos = celdas.map(c => c.innerText?.trim() || '');
                 
-                // Mapear según las columnas de la imagen
                 return {
                     accion: datos[0] || '',
                     fechaSolicitud: datos[1] || '',
@@ -147,29 +144,19 @@ async function consultarServiciosOnTimeCar(cedula) {
             }).filter(servicio => servicio !== null && servicio.nombre);
         });
 
-        console.log(`[SCRAPER] Se encontraron ${servicios.length} servicios`);
-
-        // Si no se encontraron servicios, tomar captura para debugging
-        if (servicios.length === 0) {
-            console.log('[SCRAPER] No se encontraron servicios. Tomando captura para debug...');
-            try {
-                const screenshot = await page.screenshot({ encoding: 'base64', fullPage: true });
-                console.log('[SCRAPER] Captura tomada (base64)');
-            } catch (e) {
-                console.log('[SCRAPER] Error al tomar captura:', e.message);
-            }
-        }
+        console.log(`[SCRAPER] Se encontraron ${servicios.length} registros en ${tipoConsulta}`);
 
         await browser.close();
 
         return {
             success: true,
+            tipo: tipoConsulta,
             cedula: cedula,
             total: servicios.length,
             servicios: servicios,
             mensaje: servicios.length > 0 
-                ? `Se encontraron ${servicios.length} servicio(s) para la cédula ${cedula}`
-                : `No se encontraron servicios para la cédula ${cedula}`
+                ? `Se encontraron ${servicios.length} registro(s) en ${tipoConsulta} para la cédula ${cedula}`
+                : `No se encontraron registros en ${tipoConsulta} para la cédula ${cedula}`
         };
 
     } catch (error) {
@@ -182,7 +169,8 @@ async function consultarServiciosOnTimeCar(cedula) {
         return {
             success: false,
             error: true,
-            mensaje: `Error al consultar servicios: ${error.message}`,
+            tipo: tipoConsulta,
+            mensaje: `Error al consultar ${tipoConsulta}: ${error.message}`,
             detalle: error.stack
         };
     }
@@ -193,27 +181,24 @@ app.get('/health', (req, res) => {
     res.json({
         status: 'ok',
         mensaje: 'Servidor OnTimeCar Scraper funcionando correctamente',
-        version: '2.1.0',
-        tipo: 'Scraper Real con Puppeteer MEJORADO',
+        version: '3.0.0',
+        tipo: 'Scraper Multi-Endpoint',
+        endpoints_disponibles: Object.keys(ONTIMECAR_CONFIG.endpoints),
         timestamp: new Date().toISOString()
     });
 });
 
-// Endpoint principal de consulta (GET)
-app.get('/consulta', async (req, res) => {
+// Endpoint: Agendamiento
+app.get('/consulta/agendamiento', async (req, res) => {
     try {
         const cedula = req.query.cedula;
-        
         if (!cedula) {
             return res.status(400).json({
                 error: true,
                 mensaje: 'El parámetro "cedula" es requerido'
             });
         }
-
-        console.log(`[API] Recibida consulta para cédula: ${cedula}`);
-        const resultado = await consultarServiciosOnTimeCar(cedula);
-        
+        const resultado = await consultarOnTimeCar(cedula, 'agendamiento');
         res.json(resultado);
     } catch (error) {
         console.error('[ERROR]', error);
@@ -225,10 +210,76 @@ app.get('/consulta', async (req, res) => {
     }
 });
 
-// Endpoint POST alternativo
+// Endpoint: Programación
+app.get('/consulta/programacion', async (req, res) => {
+    try {
+        const cedula = req.query.cedula;
+        if (!cedula) {
+            return res.status(400).json({
+                error: true,
+                mensaje: 'El parámetro "cedula" es requerido'
+            });
+        }
+        const resultado = await consultarOnTimeCar(cedula, 'programacion');
+        res.json(resultado);
+    } catch (error) {
+        console.error('[ERROR]', error);
+        res.status(500).json({
+            error: true,
+            mensaje: 'Error interno del servidor',
+            detalle: error.message
+        });
+    }
+});
+
+// Endpoint: Panel de Agendamientos
+app.get('/consulta/panel', async (req, res) => {
+    try {
+        const cedula = req.query.cedula;
+        if (!cedula) {
+            return res.status(400).json({
+                error: true,
+                mensaje: 'El parámetro "cedula" es requerido'
+            });
+        }
+        const resultado = await consultarOnTimeCar(cedula, 'panel');
+        res.json(resultado);
+    } catch (error) {
+        console.error('[ERROR]', error);
+        res.status(500).json({
+            error: true,
+            mensaje: 'Error interno del servidor',
+            detalle: error.message
+        });
+    }
+});
+
+// Endpoint: Preautorizaciones
+app.get('/consulta/preautorizaciones', async (req, res) => {
+    try {
+        const cedula = req.query.cedula;
+        if (!cedula) {
+            return res.status(400).json({
+                error: true,
+                mensaje: 'El parámetro "cedula" es requerido'
+            });
+        }
+        const resultado = await consultarOnTimeCar(cedula, 'preautorizaciones');
+        res.json(resultado);
+    } catch (error) {
+        console.error('[ERROR]', error);
+        res.status(500).json({
+            error: true,
+            mensaje: 'Error interno del servidor',
+            detalle: error.message
+        });
+    }
+});
+
+// Endpoint POST genérico (acepta tipo en el body)
 app.post('/consulta', async (req, res) => {
     try {
-        const { cedula } = req.body;
+        const { cedula, tipo } = req.body;
         
         if (!cedula) {
             return res.status(400).json({
@@ -237,9 +288,17 @@ app.post('/consulta', async (req, res) => {
             });
         }
 
-        console.log(`[API] Recibida consulta para cédula: ${cedula}`);
-        const resultado = await consultarServiciosOnTimeCar(cedula);
+        const tipoConsulta = tipo || 'agendamiento';
         
+        if (!ONTIMECAR_CONFIG.endpoints[tipoConsulta]) {
+            return res.status(400).json({
+                error: true,
+                mensaje: `Tipo de consulta inválido: ${tipoConsulta}`,
+                tipos_validos: Object.keys(ONTIMECAR_CONFIG.endpoints)
+            });
+        }
+
+        const resultado = await consultarOnTimeCar(cedula, tipoConsulta);
         res.json(resultado);
     } catch (error) {
         console.error('[ERROR]', error);
@@ -255,14 +314,17 @@ app.post('/consulta', async (req, res) => {
 app.get('/', (req, res) => {
     res.json({
         servicio: 'OnTimeCar Scraper API',
-        version: '2.1.0',
-        tipo: 'Scraper Real con Puppeteer MEJORADO',
+        version: '3.0.0',
+        tipo: 'Scraper Multi-Endpoint',
         endpoints: {
             health: 'GET /health',
-            consulta_get: 'GET /consulta?cedula=NUMERO_CEDULA',
-            consulta_post: 'POST /consulta (body: { "cedula": "NUMERO_CEDULA" })'
+            agendamiento: 'GET /consulta/agendamiento?cedula=NUMERO',
+            programacion: 'GET /consulta/programacion?cedula=NUMERO',
+            panel: 'GET /consulta/panel?cedula=NUMERO',
+            preautorizaciones: 'GET /consulta/preautorizaciones?cedula=NUMERO',
+            consulta_post: 'POST /consulta (body: { "cedula": "NUMERO", "tipo": "agendamiento|programacion|panel|preautorizaciones" })'
         },
-        documentacion: 'Consulta el estado de servicios de On Time Car por cédula mediante scraping'
+        documentacion: 'Consulta el estado de servicios de On Time Car por cédula en diferentes secciones'
     });
 });
 
@@ -271,7 +333,14 @@ app.use((req, res) => {
     res.status(404).json({
         error: true,
         mensaje: 'Endpoint no encontrado',
-        ruta: req.path
+        ruta: req.path,
+        endpoints_disponibles: [
+            '/health',
+            '/consulta/agendamiento',
+            '/consulta/programacion',
+            '/consulta/panel',
+            '/consulta/preautorizaciones'
+        ]
     });
 });
 
@@ -281,7 +350,10 @@ app.listen(PORT, '0.0.0.0', () => {
     console.log(`📡 Escuchando en puerto ${PORT}`);
     console.log(`🌐 Endpoints disponibles:`);
     console.log(`   - GET  /health`);
-    console.log(`   - GET  /consulta?cedula=NUMERO`);
-    console.log(`   - POST /consulta`);
+    console.log(`   - GET  /consulta/agendamiento?cedula=NUMERO`);
+    console.log(`   - GET  /consulta/programacion?cedula=NUMERO`);
+    console.log(`   - GET  /consulta/panel?cedula=NUMERO`);
+    console.log(`   - GET  /consulta/preautorizaciones?cedula=NUMERO`);
+    console.log(`   - POST /consulta (body con cedula y tipo)`);
     console.log(`🔐 Credenciales configuradas: ${ONTIMECAR_CONFIG.username}`);
 });
