@@ -28,7 +28,7 @@ const ONTIMECAR_CONFIG = {
 // Mapeo de columnas por tipo de consulta con columnas a omitir
 const COLUMNAS_POR_TIPO = {
     agendamiento: {
-        skip: 3, // Omitir 3 columnas iniciales (Menú + 2 fechas del sistema)
+        skip: 1, // Omitir 1 columna inicial (columna de acciones/menú)
         columnas: [
             'fechaCita',
             'identificacionUsuario',
