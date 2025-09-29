@@ -1,671 +1,573 @@
-/**
- * server.js - OnTimeCar Scraper (versión reparada y completa)
- * - Mantiene estructura y endpoints existentes
- * - Lectura robusta de campos dentro de inputs/select/textarea/contenteditable
- * - Filtrado por cédula normalizado (solo dígitos)
- * - Devuelve una única fila exacta para agendamiento (primer match)
- * - Incluye Fecha Vigencia, IPS Destino y Estado en la salida
- */
-
+// server.js - Scraper OnTimeCar con múltiples endpoints CORREGIDO
 const express = require('express');
 const puppeteer = require('puppeteer');
-
 const app = express();
-app.use(express.json());
-
 const PORT = process.env.PORT || 3000;
 
-// --- Mantén aquí exactamente tus constantes como prefieras ---
-const ONTIMECAR_CONFIG = {
-  loginUrl: 'https://app.ontimecar.co/app/home/',
-  username: 'ANDRES',
-  password: 'IAResponsable',
-  endpoints: {
-    agendamiento: 'https://app.ontimecar.co/app/agendamiento/',
-    programacion: 'https://app.ontimecar.co/app/programacion/',
-    panel: 'https://app.ontimecar.co/app/agendamientos_panel/',
-    preautorizaciones: 'https://app.ontimecar.co/app/preautorizaciones/'
-  }
-};
+app.use(express.json());
 
-// Mantener el mapeo de columnas tal como lo tenías (puedes ajustar nombres más legibles si quieres)
-const COLUMNAS_POR_TIPO = {
-  agendamiento: {
-    skip: 0,
-    columnas: [
-      'col_0_acciones',
-      'col_1',
-      'col_2_sms',
-      'col_3_fechaCita',
-      'col_4_identificacionUsuario',
-      'col_5_nombreUsuario',
-      'col_6_telefonoUsuario',
-      'col_7_zona',
-      'col_8_ciudadOrigen',
-      'col_9_direccionOrigen',
-      'col_10_ciudadDestino',
-      'col_11_ipsDestino',
-      'col_12_cantidadServiciosAutorizados',
-      'col_13_numeroAutorizacion',
-      'col_14_fechaVigencia', // <-- importante: incluida
-      'col_15_horaRecogida',
-      'col_16_horaRetorno',
-      'col_17_nombreAcompanante',
-      'col_18_identificacionAcompanante',
-      'col_19_parentesco',
-      'col_20_telefonoAcompanante',
-      'col_21_conductor',
-      'col_22_celular',
-      'col_23_observaciones',
-      'col_24_estado'
-    ]
-  },
-  programacion: {
-    skip: 0,
-    columnas: [
-      'col_0_exportar',
-      'col_1_correoEnviado',
-      'col_2_fechaCita',
-      'col_3_nombrePaciente',
-      'col_4_numeroTelAfiliado',
-      'col_5_documento',
-      'col_6_ciudadOrigen',
-      'col_7_direccionOrigen',
-      'col_8_vacia',
-      'col_9_ciudadDestino',
-      'col_10_direccionDestino',
-      'col_11_horaRecogida',
-      'col_12_horaRetorno',
-      'col_13_conductor',
-      'col_14_vacia',
-      'col_15_eps',
-      'col_16_observaciones',
-      'col_17_vacia',
-      'col_18_correo',
-      'col_19_vacia',
-      'col_20_zona',
-      'col_21_autorizacion'
-    ]
-  },
-  panel: {
-    skip: 0,
-    columnas: [
-      'col_0_acciones',
-      'col_1_fechaEmision',
-      'col_2_fechaFinal',
-      'col_3_tipoId',
-      'col_4_nombreAfiliado',
-      'col_5_clase',
-      'col_6_numero',
-      'col_7_estado',
-      'col_8_codigo',
-      'col_9_cantidad',
-      'col_10_numeroPrescripcion',
-      'col_11_ciudadOrigen',
-      'col_12_direccionOrigen',
-      'col_13_ciudadDestino',
-      'col_14_direccionDestino',
-      'col_15_eps',
-      'col_16_cantidadServicios',
-      'col_17_subirAutorizacion',
-      'col_18_observaciones',
-      'col_19_nombreAco',
-      'col_20_parentesco',
-      'col_21_telefonoAco',
-      'col_22_tipoDocumentoAco',
-      'col_23_numeroDocumentoAco',
-      'col_24_agendamientosExistentes'
-    ]
-  },
-  preautorizaciones: {
-    skip: 0,
-    columnas: [
-      'col_0_acciones',
-      'col_1_agendamientoAutorizaciones',
-      'col_2_fechaEmision',
-      'col_3_fechaFinal',
-      'col_4_tipoIdAfiliado',
-      'col_5_nombreAfiliado',
-      'col_6_clase',
-      'col_7_vacia',
-      'col_8_numero',
-      'col_9_estado',
-      'col_10_vacia',
-      'col_11_codigo',
-      'col_12_cantidad',
-      'col_13_numeroPrescripcion',
-      'col_14_ciudadOrigen',
-      'col_15_direccionOrigen',
-      'col_16_ciudadDestino',
-      'col_17_direccionDestino',
-      'col_18_cantidadEpsServicios',
-      'col_19_subirAutorizacion',
-      'col_20_vacia',
-      'col_21_nombreAco',
-      'col_22_idAco',
-      'col_23_numeroAco',
-      'col_24_telefonoAco',
-      'col_25_parentesco',
-      'col_26_vacia',
-      'col_27_aco',
-      'col_28_agendamientosExistentes'
-    ]
-  }
-};
-
-// Logging middleware
+// Middleware para logging
 app.use((req, res, next) => {
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path} - query: ${JSON.stringify(req.query)}`);
-  next();
+    console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
+    next();
 });
 
-// Util: normalizar solo dígitos
-function normalizeDigits(str) {
-  if (!str && str !== 0) return '';
-  return String(str).replace(/\D/g, '');
-}
+// Credenciales de OnTimeCar
+const ONTIMECAR_CONFIG = {
+    loginUrl: 'https://app.ontimecar.co/app/home/',
+    username: 'ANDRES',
+    password: 'IAResponsable',
+    endpoints: {
+        agendamiento: 'https://app.ontimecar.co/app/agendamiento/',
+        programacion: 'https://app.ontimecar.co/app/programacion/',
+        panel: 'https://app.ontimecar.co/app/agendamientos_panel/',
+        preautorizaciones: 'https://app.ontimecar.co/app/preautorizaciones/'
+    }
+};
 
-// Función que hace login, filtra y extrae según tipo
+// Función mejorada para hacer login y scraping
 async function consultarOnTimeCar(cedula, tipoConsulta) {
-  let browser = null;
-  try {
-    if (!ONTIMECAR_CONFIG.endpoints[tipoConsulta]) {
-      throw new Error(`Tipo de consulta inválido: ${tipoConsulta}`);
-    }
-
-    const cedulaNormalized = normalizeDigits(cedula || '');
-
-    console.log(`[SCRAPER] Inicio: tipo=${tipoConsulta} cedula=${cedula} normalized=${cedulaNormalized}`);
-
-    browser = await puppeteer.launch({
-      headless: 'new',
-      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
-    });
-
-    const page = await browser.newPage();
-    await page.setViewport({ width: 1366, height: 800 });
-
-    // --- LOGIN (robusto) ---
-    console.log('[SCRAPER] Navegando a login...');
-    await page.goto(ONTIMECAR_CONFIG.loginUrl, { waitUntil: 'networkidle2', timeout: 45000 });
-
-    // Esperar inputs (varios selectores por compatibilidad)
-    await page.waitForSelector('input[name="username"], input#username, input[type="text"], input[name="email"]', { timeout: 15000 });
-
-    // Rellenar inputs mediante evaluate para disparar eventos
-    await page.evaluate((username, password) => {
-      const u = document.querySelector('input[name="username"], input#username, input[type="text"], input[name="email"]');
-      const p = document.querySelector('input[name="password"], input#password, input[type="password"]');
-      if (u) { u.focus(); u.value = username; u.dispatchEvent(new Event('input', { bubbles: true })); }
-      if (p) { p.focus(); p.value = password; p.dispatchEvent(new Event('input', { bubbles: true })); }
-    }, ONTIMECAR_CONFIG.username, ONTIMECAR_CONFIG.password);
-
-    // Intentar submit robusto
-    await Promise.all([
-      page.evaluate(() => {
-        const btn = document.querySelector('button[type="submit"], input[type="submit"], button.btn-primary');
-        if (btn) { btn.click(); return true; }
-        const form = document.querySelector('form');
-        if (form) { form.submit(); return true; }
-        return false;
-      }),
-      page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 45000 }).catch(() => null)
-    ]);
-
-    console.log('[SCRAPER] Login realizado (o se completó por AJAX).');
-
-    // --- Ir a la página del tipo de consulta ---
-    const urlBase = ONTIMECAR_CONFIG.endpoints[tipoConsulta];
-    console.log(`[SCRAPER] Navegando a ${urlBase}`);
-    await page.goto(urlBase, { waitUntil: 'networkidle2', timeout: 45000 });
-    await page.waitForTimeout(1200);
-
-    // --- Buscar campo de búsqueda y filtrar por cédula ---
-    const searchSelectors = [
-      'input[type="search"]',
-      'input[placeholder*="Buscar"]',
-      'input[placeholder*="buscar"]',
-      'input[aria-controls]',
-      'input[name="search"]',
-      'input[id*="search"]',
-      'input[class*="search"]',
-      'input.form-control'
-    ];
-
-    let searchFound = false;
-    for (const sel of searchSelectors) {
-      const el = await page.$(sel);
-      if (el) {
-        try {
-          await page.evaluate((selector, value) => {
-            const input = document.querySelector(selector);
-            if (!input) return;
-            input.focus();
-            input.value = '';
-            input.value = value;
-            input.dispatchEvent(new Event('input', { bubbles: true }));
-            input.dispatchEvent(new Event('change', { bubbles: true }));
-          }, sel, cedula);
-          // intentar ENTER
-          await page.keyboard.press('Enter').catch(() => null);
-          await page.waitForTimeout(1200);
-          searchFound = true;
-          console.log(`[SCRAPER] Cédula ingresada en selector ${sel}`);
-          break;
-        } catch (err) {
-          console.warn('[SCRAPER] fallo escritura en selector', sel, err.message);
-        }
-      }
-    }
-
-    if (!searchFound) {
-      // heurística: intentar con primer input visible que probablemente sea búsqueda y click en boton filtrar si existe
-      try {
-        await page.evaluate((value) => {
-          const inputs = Array.from(document.querySelectorAll('input')).filter(i => i.offsetParent !== null && i.type !== 'hidden');
-          if (inputs.length === 0) return;
-          // priorizar inputs que contengan palabras relevantes
-          let input = inputs.find(i => /buscar|search|cedul|ident|documento/i.test(i.placeholder || i.name || i.id || i.className)) || inputs[0];
-          input.focus();
-          input.value = value;
-          input.dispatchEvent(new Event('input', { bubbles: true }));
-          input.dispatchEvent(new Event('change', { bubbles: true }));
-        }, cedula);
-        // intentar click en botón filtrar
-        const filtroBtn = await page.$x("//button[contains(translate(., 'FILTRAR', 'filtrar'), 'filtrar') or contains(., 'Filter') or contains(., 'Buscar')]");
-        if (filtroBtn && filtroBtn.length) {
-          await filtroBtn[0].click().catch(() => null);
-        }
-        await page.waitForTimeout(1400);
-        console.log('[SCRAPER] Filtrado heurístico intentado.');
-      } catch (e) {
-        console.warn('[SCRAPER] No se pudo filtrar heurísticamente:', e.message);
-      }
-    }
-
-    // Esperar filas de tabla (tolerante)
+    let browser = null;
+    
     try {
-      await page.waitForSelector('table tbody tr, .table tbody tr, .dataTable tbody tr', { timeout: 8000 });
-    } catch (e) {
-      console.warn('[SCRAPER] Timeout esperando filas de tabla; puede que no haya resultados visibles.');
-    }
-
-    // --- Extracción robusta de la tabla ---
-    console.log('[SCRAPER] Extrayendo tabla de la página...');
-
-    const configColumnas = COLUMNAS_POR_TIPO[tipoConsulta];
-
-    const servicios = await page.evaluate((config) => {
-      // función local para obtener valor de una celda
-      function getCellValue(celda) {
-        if (!celda) return '';
-        // inputs
-        const input = celda.querySelector('input');
-        if (input) {
-          const t = (input.type || '').toLowerCase();
-          if (t === 'checkbox' || t === 'radio') {
-            return input.checked ? (input.value || 'true') : '';
-          }
-          if (input.value !== undefined && input.value !== null) return String(input.value).trim();
+        console.log(`[SCRAPER] Iniciando consulta ${tipoConsulta} para cédula: ${cedula}`);
+        
+        // Validar tipo de consulta
+        if (!ONTIMECAR_CONFIG.endpoints[tipoConsulta]) {
+            throw new Error(`Tipo de consulta inválido: ${tipoConsulta}`);
         }
-        // select -> texto de la opción seleccionada o value
-        const select = celda.querySelector('select');
-        if (select) {
-          try {
-            if (select.selectedIndex >= 0) {
-              const opt = select.options[select.selectedIndex];
-              if (opt && (opt.textContent || opt.innerText)) return String(opt.textContent || opt.innerText).trim();
-            }
-            if (select.value) return String(select.value).trim();
-          } catch (e) {}
-        }
-        // textarea
-        const textarea = celda.querySelector('textarea');
-        if (textarea) {
-          if (textarea.value !== undefined && textarea.value !== null) return String(textarea.value).trim();
-        }
-        // contenteditable
-        const ce = celda.querySelector('[contenteditable]');
-        if (ce && ce.textContent) return String(ce.textContent).trim();
-        // title/data attributes
-        const withTitle = celda.querySelector('[title]');
-        if (withTitle) {
-          const t = withTitle.getAttribute('title');
-          if (t) return String(t).trim();
-        }
-        const dataVal = celda.getAttribute('data-value') || celda.getAttribute('data-title') || celda.getAttribute('data-text');
-        if (dataVal) return String(dataVal).trim();
-        // anchor or img alt
-        const a = celda.querySelector('a');
-        if (a && (a.textContent || a.innerText)) return String(a.textContent || a.innerText).trim();
-        const img = celda.querySelector('img');
-        if (img && img.alt) return String(img.alt).trim();
-        // fallback innerText
-        if (celda.innerText) return String(celda.innerText).trim();
-        if (celda.textContent) return String(celda.textContent).trim();
-        return '';
-      }
-
-      // localizar tablas posibles
-      const tablas = [
-        document.querySelector('table tbody'),
-        document.querySelector('.table tbody'),
-        document.querySelector('.dataTable tbody'),
-        document.querySelector('[class*="table"] tbody'),
-        document.querySelector('tbody')
-      ].filter(t => t !== null);
-
-      if (tablas.length === 0) return [];
-
-      // elegir la primera tabla que tenga filas
-      let tbody = tablas.find(t => t.querySelectorAll('tr').length > 0) || tablas[0];
-      const filas = Array.from(tbody.querySelectorAll('tr'));
-      const resultados = filas.map(fila => {
-        const celdas = Array.from(fila.querySelectorAll('td'));
-        if (celdas.length === 0) return null;
-        const datos = celdas.map(c => getCellValue(c));
-        // construir objeto mapeado por índice (sin renombrar)
-        const registro = {};
-        // guardamos columnas completas por índice para diagnóstico
-        registro._raw = datos;
-        // también guardamos texto combinado
-        registro._textoFila = datos.join(' | ');
-        return registro;
-      }).filter(r => r !== null);
-
-      return resultados;
-    }, configColumnas);
-
-    // servicios: array con registros que tienen _raw (array of cell texts)
-    // Ahora mapeamos a nombres según configColumnas.columnas
-    const mapeados = servicios.map(r => {
-      const datos = r._raw || [];
-      const datosRelevantes = datos.slice(configColumnas.skip || 0);
-      const registro = {};
-      configColumnas.columnas.forEach((nombre, idx) => {
-        registro[nombre] = datosRelevantes[idx] !== undefined ? datosRelevantes[idx] : '';
-      });
-      // incluir texto completo para rastreo
-      registro._textoFila = r._textoFila;
-      return registro;
-    });
-
-    console.log(`[SCRAPER] Filas mapeadas: ${mapeados.length}`);
-
-    // --- FILTRADO por cédula: comportamiento especial para agendamiento ---
-    let filtered = mapeados;
-
-    // función utilitaria para intentar localizar campo identificacion dentro de un registro
-    function registroContainsCedula(reg, cedulaNorm) {
-      if (!cedulaNorm) return false;
-      // Check all values in the record: if any contains the normalized cedula as substring or equals
-      for (const k of Object.keys(reg)) {
-        if (k.startsWith('_')) continue;
-        const v = reg[k] || '';
-        const vnorm = ('' + (v || '')).replace(/\D/g, '');
-        if (!vnorm) continue;
-        if (vnorm === cedulaNorm) return true;
-        if (vnorm.includes(cedulaNorm)) return true;
-      }
-      return false;
-    }
-
-    if (tipoConsulta === 'agendamiento' && cedulaNormalized) {
-      const exactMatches = mapeados.filter(r => registroContainsCedula(r, cedulaNormalized));
-      if (exactMatches.length > 0) {
-        // tomar la primera coincidencia exacta (prioridad)
-        filtered = [exactMatches[0]];
-      } else {
-        // fallback: si no hay exact matches, intentar includes sin normalizar estrictamente
-        const looseMatches = mapeados.filter(r => {
-          for (const k of Object.keys(r)) {
-            if (k.startsWith('_')) continue;
-            const v = r[k] || '';
-            if (('' + v).toLowerCase().includes(cedulaNormalized)) return true;
-          }
-          return false;
+        
+        // Lanzar navegador
+        browser = await puppeteer.launch({
+            headless: 'new',
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-gpu',
+                '--disable-web-security',
+                '--disable-features=VizDisplayCompositor'
+            ]
         });
-        filtered = looseMatches;
-      }
-    } else if (cedulaNormalized) {
-      // para otros tipos, filtrar si aparece la cédula normalizada en cualquier celda
-      filtered = mapeados.filter(r => registroContainsCedula(r, cedulaNormalized));
-    }
 
-    console.log(`[SCRAPER] Registros después de filtrar por cédula: ${filtered.length}`);
+        const page = await browser.newPage();
+        
+        // Configurar timeout más largo
+        page.setDefaultTimeout(60000);
+        page.setDefaultNavigationTimeout(60000);
+        
+        await page.setViewport({ width: 1366, height: 768 });
 
-    // --- Si es agendamiento, devolver solo 1 registro (primer match) y mapear campos prioritarios ---
-    if (tipoConsulta === 'agendamiento') {
-      if (filtered.length === 0) {
-        // devolver estructura vacía (compatibilidad con N8N)
+        // Configurar intercepción de requests para evitar recursos pesados
+        await page.setRequestInterception(true);
+        page.on('request', (req) => {
+            if (['image', 'stylesheet', 'font'].includes(req.resourceType())) {
+                req.abort();
+            } else {
+                req.continue();
+            }
+        });
+
+        // PASO 1: Hacer login
+        console.log('[SCRAPER] Navegando a página de login...');
+        await page.goto(ONTIMECAR_CONFIG.loginUrl, { 
+            waitUntil: 'networkidle2',
+            timeout: 60000 
+        });
+
+        console.log('[SCRAPER] Ingresando credenciales...');
+        
+        // Esperar y encontrar inputs de login de forma más robusta
+        await page.waitForFunction(() => {
+            const inputs = document.querySelectorAll('input[type="text"], input[type="password"], input[name*="user"], input[name*="pass"]');
+            return inputs.length >= 2;
+        }, { timeout: 15000 });
+
+        // Encontrar inputs de forma más flexible
+        const usernameInput = await page.$('input[type="text"], input[name="username"], input[name="user"], input#username, input[placeholder*="usuario"], input[placeholder*="Usuario"]');
+        const passwordInput = await page.$('input[type="password"], input[name="password"], input[name="pass"], input#password, input[placeholder*="contraseña"], input[placeholder*="Contraseña"]');
+
+        if (!usernameInput || !passwordInput) {
+            throw new Error('No se pudieron encontrar los campos de login');
+        }
+
+        await usernameInput.click({ clickCount: 3 });
+        await usernameInput.type(ONTIMECAR_CONFIG.username, { delay: 100 });
+        
+        await passwordInput.click({ clickCount: 3 });
+        await passwordInput.type(ONTIMECAR_CONFIG.password, { delay: 100 });
+        
+        // Hacer click en el botón de login
+        const loginButton = await page.$('button[type="submit"], input[type="submit"], button.btn-primary, button[class*="btn"], input[class*="btn"]');
+        if (loginButton) {
+            await Promise.all([
+                loginButton.click(),
+                page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 60000 })
+            ]);
+        } else {
+            await page.keyboard.press('Enter');
+            await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 60000 });
+        }
+
+        console.log(`[SCRAPER] Login exitoso. Navegando a ${tipoConsulta}...`);
+
+        // PASO 2: Navegar a la página específica
+        const urlBase = ONTIMECAR_CONFIG.endpoints[tipoConsulta];
+        await page.goto(urlBase, { 
+            waitUntil: 'networkidle2',
+            timeout: 60000 
+        });
+
+        console.log('[SCRAPER] Página cargada, buscando campo de búsqueda...');
+
+        // Estrategia mejorada para buscar y filtrar
+        let busquedaRealizada = false;
+
+        // Intentar diferentes métodos para encontrar el campo de búsqueda
+        const selectoresBusqueda = [
+            'input[type="search"]',
+            'input[placeholder*="buscar"]',
+            'input[placeholder*="Buscar"]',
+            'input[name="search"]',
+            'input[class*="search"]',
+            '.dataTables_filter input',
+            '.table-filter input',
+            'input[type="text"]'
+        ];
+
+        let campoBusqueda = null;
+        for (const selector of selectoresBusqueda) {
+            campoBusqueda = await page.$(selector);
+            if (campoBusqueda) {
+                console.log(`[SCRAPER] Encontrado campo de búsqueda con selector: ${selector}`);
+                break;
+            }
+        }
+
+        if (campoBusqueda) {
+            console.log('[SCRAPER] Escribiendo cédula en campo de búsqueda...');
+            await campoBusqueda.click({ clickCount: 3 });
+            await campoBusqueda.type(cedula, { delay: 100 });
+            
+            // Esperar a que los resultados se filtren
+            await page.waitForTimeout(3000);
+            busquedaRealizada = true;
+        } else {
+            console.log('[SCRAPER] No se encontró campo de búsqueda, procediendo sin filtro...');
+        }
+
+        // Si no se pudo hacer búsqueda, intentar con parámetros URL
+        if (!busquedaRealizada) {
+            console.log('[SCRAPER] Intentando con parámetros URL...');
+            const urlConFiltro = `${urlBase}?search=${encodeURIComponent(cedula)}`;
+            await page.goto(urlConFiltro, { 
+                waitUntil: 'networkidle2',
+                timeout: 60000 
+            });
+        }
+
+        console.log('[SCRAPER] Esperando a que cargue la tabla...');
+        
+        // Esperar más tiempo y con diferentes estrategias
+        await page.waitForTimeout(5000);
+
+        // Intentar diferentes selectores de tabla
+        const selectoresTabla = [
+            'table tbody tr',
+            '.table tbody tr',
+            '.dataTable tbody tr',
+            '[class*="table"] tbody tr',
+            'tbody tr',
+            'tr[role="row"]',
+            '.agendamiento-row',
+            '.programacion-row'
+        ];
+
+        let filasEncontradas = [];
+        
+        for (const selector of selectoresTabla) {
+            try {
+                await page.waitForSelector(selector, { timeout: 5000 });
+                filasEncontradas = await page.$$(selector);
+                if (filasEncontradas.length > 0) {
+                    console.log(`[SCRAPER] Encontradas ${filasEncontradas.length} filas con selector: ${selector}`);
+                    break;
+                }
+            } catch (e) {
+                // Continuar con el siguiente selector
+            }
+        }
+
+        // Si no encontramos filas, intentar una estrategia más agresiva
+        if (filasEncontradas.length === 0) {
+            console.log('[SCRAPER] Buscando cualquier tabla en la página...');
+            filasEncontradas = await page.$$('table tr, .table tr, tbody tr, tr');
+            console.log(`[SCRAPER] Encontrados ${filasEncontradas.length} elementos tr en total`);
+        }
+
+        // PASO 3: Extraer datos de forma más robusta
+        console.log('[SCRAPER] Extrayendo datos de la tabla...');
+        
+        const servicios = await page.evaluate(() => {
+            // Buscar todas las tablas posibles
+            const todasLasTablas = Array.from(document.querySelectorAll('table, .table, [class*="table"]'));
+            console.log(`Encontradas ${todasLasTablas.length} tablas en la página`);
+
+            let todosLosDatos = [];
+
+            todasLasTablas.forEach((tabla, tablaIndex) => {
+                // Buscar filas en diferentes ubicaciones
+                const cuerposTabla = [
+                    tabla.querySelector('tbody'),
+                    tabla
+                ].filter(t => t !== null);
+
+                cuerposTabla.forEach(cuerpo => {
+                    const filas = Array.from(cuerpo.querySelectorAll('tr')).filter(tr => {
+                        // Filtrar filas de encabezado
+                        const thCount = tr.querySelectorAll('th').length;
+                        return thCount === 0;
+                    });
+
+                    console.log(`Tabla ${tablaIndex + 1}: ${filas.length} filas de datos`);
+
+                    filas.forEach((fila, filaIndex) => {
+                        const celdas = Array.from(fila.querySelectorAll('td, th'));
+                        
+                        if (celdas.length > 0) {
+                            const datos = celdas.map((c, index) => {
+                                // Obtener texto limpio
+                                let texto = c.innerText?.trim() || '';
+                                // Limpiar texto de espacios múltiples y saltos de línea
+                                texto = texto.replace(/\s+/g, ' ').trim();
+                                return texto;
+                            });
+
+                            // Crear objeto con todos los datos disponibles
+                            const servicio = {
+                                tabla: tablaIndex + 1,
+                                fila: filaIndex + 1,
+                                datosCompletos: datos,
+                                datosRaw: datos.join(' | ')
+                            };
+
+                            // Mapear datos por posición (ajusta según tu estructura)
+                            if (datos.length >= 1) servicio.accion = datos[0];
+                            if (datos.length >= 2) servicio.fechaSolicitud = datos[1];
+                            if (datos.length >= 3) servicio.fechaRecepcion = datos[2];
+                            if (datos.length >= 4) servicio.tipoDocumento = datos[3];
+                            if (datos.length >= 5) servicio.nombre = datos[4];
+                            if (datos.length >= 6) servicio.clase = datos[6];
+                            if (datos.length >= 7) servicio.numero = datos[6];
+                            if (datos.length >= 8) servicio.estado = datos[7];
+                            if (datos.length >= 9) servicio.codigo = datos[8];
+                            if (datos.length >= 10) servicio.cantidad = datos[9];
+                            if (datos.length >= 11) servicio.prescripcion = datos[10];
+                            if (datos.length >= 12) servicio.ciudadOrigen = datos[11];
+                            if (datos.length >= 13) servicio.direccionOrigen = datos[12];
+                            if (datos.length >= 14) servicio.ciudadDestino = datos[13];
+                            if (datos.length >= 15) servicio.direccionDestino = datos[14];
+                            if (datos.length >= 16) servicio.eps = datos[15];
+                            if (datos.length >= 17) servicio.cantidadServicios = datos[16];
+                            if (datos.length >= 18) servicio.subirAutorizacion = datos[17];
+                            if (datos.length >= 19) servicio.observaciones = datos[18];
+                            if (datos.length >= 20) servicio.nombrePaciente = datos[19];
+                            if (datos.length >= 21) servicio.parentesco = datos[20];
+                            if (datos.length >= 22) servicio.telefonoDocumentoAco = datos[21];
+                            if (datos.length >= 23) servicio.numeroDocumentoAco = datos[22];
+                            if (datos.length >= 24) servicio.agendamientos = datos[23];
+
+                            todosLosDatos.push(servicio);
+                        }
+                    });
+                });
+            });
+
+            return todosLosDatos;
+        });
+
+        // Filtrar servicios que contengan la cédula buscada
+        const serviciosFiltrados = servicios.filter(servicio => {
+            const textoCompleto = servicio.datosRaw.toLowerCase();
+            return textoCompleto.includes(cedula.toLowerCase());
+        });
+
+        console.log(`[SCRAPER] Se encontraron ${servicios.length} registros totales, ${serviciosFiltrados.length} filtrados por cédula`);
+
         await browser.close();
+
         return {
-          success: true,
-          tipo: tipoConsulta,
-          cedula: cedula,
-          total: 0,
-          servicios: [],
-          mensaje: `No se encontraron registros en ${tipoConsulta} para la cédula ${cedula}`
+            success: true,
+            tipo: tipoConsulta,
+            cedula: cedula,
+            total: serviciosFiltrados.length,
+            servicios: serviciosFiltrados,
+            mensaje: serviciosFiltrados.length > 0 
+                ? `Se encontraron ${serviciosFiltrados.length} registro(s) en ${tipoConsulta} para la cédula ${cedula}`
+                : `No se encontraron registros en ${tipoConsulta} para la cédula ${cedula}`
         };
-      }
 
-      // Tomar el primer registro
-      const r = filtered[0];
+    } catch (error) {
+        console.error('[ERROR]', error);
+        
+        if (browser) {
+            await browser.close();
+        }
 
-      // Mapear campos importantes — intentar leer por nombres de columna que definiste en COLUMNAS_POR_TIPO
-      // Los nombres en el registro son 'col_3_fechaCita', etc. (según COLUMNAS_POR_TIPO.agendamiento.columnas)
-      const map = {};
-      const get = (colName) => r[colName] !== undefined ? r[colName] : '';
-
-      // Nombres en el mapeo original:
-      // 'col_3_fechaCita', 'col_4_identificacionUsuario', 'col_9_direccionOrigen', 'col_14_fechaVigencia', 'col_15_horaRecogida', 'col_16_horaRetorno',
-      // 'col_17_nombreAcompanante', 'col_18_identificacionAcompanante', 'col_19_parentesco', 'col_20_telefonoAcompanante', 'col_11_ipsDestino', 'col_24_estado'
-      map.identificacion_usuario = (get('col_4_identificacionUsuario') || '').trim();
-      // Normalizar: si la celda contiene prefijos como "CC 6255692", extraer solo dígitos en campo separado también
-      map.identificacion_usuario_digits = normalizeDigits(map.identificacion_usuario);
-      map.fecha_cita = (get('col_3_fechaCita') || '').trim();
-      map.fecha_vigencia = (get('col_14_fechaVigencia') || '').trim();
-      map.direccion_origen = (get('col_9_direccionOrigen') || '').trim();
-      map.hora_recogida = (get('col_15_horaRecogida') || '').trim();
-      map.hora_retorno = (get('col_16_horaRetorno') || '').trim();
-      map.nombre_acompanante = (get('col_17_nombreAcompanante') || '').trim();
-      map.identificacion_acompanante = (get('col_18_identificacionAcompanante') || '').trim();
-      map.parentesco = (get('col_19_parentesco') || '').trim();
-      map.telefono_acompanante = (get('col_20_telefonoAcompanante') || '').trim();
-      map.observaciones = (get('col_23_observaciones') || '').trim();
-      map.ips_destino = (get('col_11_ipsDestino') || '').trim();
-      map.estado = (get('col_24_estado') || '').trim();
-
-      // También agregar numero autorizacion y otros campos que puedan ser útiles
-      map.numero_autorizacion = (get('col_13_numeroAutorizacion') || '').trim();
-      map.cantidad_servicios_autorizados = (get('col_12_cantidadServiciosAutorizados') || '').trim();
-      map.nombre_usuario = (get('col_5_nombreUsuario') || '').trim();
-      map.telefono_usuario = (get('col_6_telefonoUsuario') || '').trim();
-      map.zona = (get('col_7_zona') || '').trim();
-      map.ciudad_origen = (get('col_8_ciudadOrigen') || '').trim();
-      map.ciudad_destino = (get('col_10_ciudadDestino') || '').trim();
-
-      await browser.close();
-      return {
-        success: true,
-        tipo: tipoConsulta,
-        cedula: cedula,
-        total: 1,
-        servicios_originales_count: mapeados.length,
-        servicio: map,
-        mensaje: `Se encontró 1 registro en ${tipoConsulta} para la cédula ${cedula}`
-      };
+        return {
+            success: false,
+            error: true,
+            tipo: tipoConsulta,
+            cedula: cedula,
+            mensaje: `Error al consultar ${tipoConsulta}: ${error.message}`,
+            detalle: error.stack
+        };
     }
-
-    // Para otros tipos (programacion, panel, preautorizaciones) devolvemos el array filtrado completo (mapeado)
-    await browser.close();
-    return {
-      success: true,
-      tipo: tipoConsulta,
-      cedula: cedula,
-      total: filtered.length,
-      servicios: filtered,
-      mensaje: filtered.length > 0 ? `Se encontraron ${filtered.length} registro(s)` : `No se encontraron registros`
-    };
-
-  } catch (error) {
-    console.error('[ERROR] consultarOnTimeCar:', error && error.message ? error.message : error);
-    try { if (browser) await browser.close(); } catch (e) {}
-    return {
-      success: false,
-      error: true,
-      tipo: tipoConsulta,
-      mensaje: `Error al consultar ${tipoConsulta}: ${error && error.message ? error.message : error}`,
-      detalle: error && error.stack ? error.stack : null
-    };
-  }
 }
 
-// --- Endpoints (compatibles con tu N8N) ---
-
+// Health Check endpoint
 app.get('/health', (req, res) => {
-  res.json({
-    status: 'ok',
-    mensaje: 'Servidor OnTimeCar Scraper funcionando correctamente',
-    version: '3.2.0-fixed-cedula-filter',
-    endpoints_disponibles: Object.keys(ONTIMECAR_CONFIG.endpoints),
-    timestamp: new Date().toISOString()
-  });
+    res.json({
+        status: 'ok',
+        mensaje: 'Servidor OnTimeCar Scraper funcionando correctamente',
+        version: '3.1.0',
+        tipo: 'Scraper Multi-Endpoint - CORREGIDO',
+        endpoints_disponibles: Object.keys(ONTIMECAR_CONFIG.endpoints),
+        timestamp: new Date().toISOString()
+    });
 });
 
+// Endpoints individuales (mantener igual)
 app.get('/consulta/agendamiento', async (req, res) => {
-  try {
-    const cedula = req.query.cedula;
-    if (!cedula) return res.status(400).json({ error: true, mensaje: 'El parámetro "cedula" es requerido' });
-    const resultado = await consultarOnTimeCar(cedula, 'agendamiento');
-    res.json(resultado);
-  } catch (error) {
-    console.error('[ERROR]', error);
-    res.status(500).json({ error: true, mensaje: 'Error interno del servidor', detalle: error.message });
-  }
+    try {
+        const cedula = req.query.cedula;
+        if (!cedula) {
+            return res.status(400).json({
+                error: true,
+                mensaje: 'El parámetro "cedula" es requerido'
+            });
+        }
+        const resultado = await consultarOnTimeCar(cedula, 'agendamiento');
+        res.json(resultado);
+    } catch (error) {
+        console.error('[ERROR]', error);
+        res.status(500).json({
+            error: true,
+            mensaje: 'Error interno del servidor',
+            detalle: error.message
+        });
+    }
 });
 
 app.get('/consulta/programacion', async (req, res) => {
-  try {
-    const cedula = req.query.cedula;
-    if (!cedula) return res.status(400).json({ error: true, mensaje: 'El parámetro "cedula" es requerido' });
-    const resultado = await consultarOnTimeCar(cedula, 'programacion');
-    res.json(resultado);
-  } catch (error) {
-    console.error('[ERROR]', error);
-    res.status(500).json({ error: true, mensaje: 'Error interno del servidor', detalle: error.message });
-  }
+    try {
+        const cedula = req.query.cedula;
+        if (!cedula) {
+            return res.status(400).json({
+                error: true,
+                mensaje: 'El parámetro "cedula" es requerido'
+            });
+        }
+        const resultado = await consultarOnTimeCar(cedula, 'programacion');
+        res.json(resultado);
+    } catch (error) {
+        console.error('[ERROR]', error);
+        res.status(500).json({
+            error: true,
+            mensaje: 'Error interno del servidor',
+            detalle: error.message
+        });
+    }
 });
 
 app.get('/consulta/panel', async (req, res) => {
-  try {
-    const cedula = req.query.cedula;
-    if (!cedula) return res.status(400).json({ error: true, mensaje: 'El parámetro "cedula" es requerido' });
-    const resultado = await consultarOnTimeCar(cedula, 'panel');
-    res.json(resultado);
-  } catch (error) {
-    console.error('[ERROR]', error);
-    res.status(500).json({ error: true, mensaje: 'Error interno del servidor', detalle: error.message });
-  }
+    try {
+        const cedula = req.query.cedula;
+        if (!cedula) {
+            return res.status(400).json({
+                error: true,
+                mensaje: 'El parámetro "cedula" es requerido'
+            });
+        }
+        const resultado = await consultarOnTimeCar(cedula, 'panel');
+        res.json(resultado);
+    } catch (error) {
+        console.error('[ERROR]', error);
+        res.status(500).json({
+            error: true,
+            mensaje: 'Error interno del servidor',
+            detalle: error.message
+        });
+    }
 });
 
 app.get('/consulta/preautorizaciones', async (req, res) => {
-  try {
-    const cedula = req.query.cedula;
-    if (!cedula) return res.status(400).json({ error: true, mensaje: 'El parámetro "cedula" es requerido' });
-    const resultado = await consultarOnTimeCar(cedula, 'preautorizaciones');
-    res.json(resultado);
-  } catch (error) {
-    console.error('[ERROR]', error);
-    res.status(500).json({ error: true, mensaje: 'Error interno del servidor', detalle: error.message });
-  }
+    try {
+        const cedula = req.query.cedula;
+        if (!cedula) {
+            return res.status(400).json({
+                error: true,
+                mensaje: 'El parámetro "cedula" es requerido'
+            });
+        }
+        const resultado = await consultarOnTimeCar(cedula, 'preautorizaciones');
+        res.json(resultado);
+    } catch (error) {
+        console.error('[ERROR]', error);
+        res.status(500).json({
+            error: true,
+            mensaje: 'Error interno del servidor',
+            detalle: error.message
+        });
+    }
 });
 
+// Nuevo endpoint: Consulta todos los tipos a la vez
+app.get('/consulta/completa', async (req, res) => {
+    try {
+        const cedula = req.query.cedula;
+        if (!cedula) {
+            return res.status(400).json({
+                error: true,
+                mensaje: 'El parámetro "cedula" es requerido'
+            });
+        }
+
+        const tipos = Object.keys(ONTIMECAR_CONFIG.endpoints);
+        const resultados = {};
+
+        for (const tipo of tipos) {
+            console.log(`[CONSULTA COMPLETA] Consultando ${tipo}...`);
+            resultados[tipo] = await consultarOnTimeCar(cedula, tipo);
+            // Pequeña pausa entre consultas
+            await new Promise(resolve => setTimeout(resolve, 2000));
+        }
+
+        res.json({
+            success: true,
+            cedula: cedula,
+            consulta_completa: true,
+            timestamp: new Date().toISOString(),
+            resultados: resultados
+        });
+
+    } catch (error) {
+        console.error('[ERROR]', error);
+        res.status(500).json({
+            error: true,
+            mensaje: 'Error en consulta completa',
+            detalle: error.message
+        });
+    }
+});
+
+// Endpoint POST genérico (mejorado)
 app.post('/consulta', async (req, res) => {
-  try {
-    const { cedula, tipo } = req.body;
-    if (!cedula) return res.status(400).json({ error: true, mensaje: 'El campo "cedula" es requerido en el body' });
-    const tipoConsulta = tipo || 'agendamiento';
-    if (!ONTIMECAR_CONFIG.endpoints[tipoConsulta]) {
-      return res.status(400).json({ error: true, mensaje: `Tipo de consulta inválido: ${tipoConsulta}`, tipos_validos: Object.keys(ONTIMECAR_CONFIG.endpoints) });
+    try {
+        const { cedula, tipo, completa } = req.body;
+        
+        if (!cedula) {
+            return res.status(400).json({
+                error: true,
+                mensaje: 'El campo "cedula" es requerido en el body'
+            });
+        }
+
+        if (completa) {
+            // Consulta completa
+            const tipos = Object.keys(ONTIMECAR_CONFIG.endpoints);
+            const resultados = {};
+
+            for (const tipoConsulta of tipos) {
+                resultados[tipoConsulta] = await consultarOnTimeCar(cedula, tipoConsulta);
+                await new Promise(resolve => setTimeout(resolve, 2000));
+            }
+
+            return res.json({
+                success: true,
+                cedula: cedula,
+                consulta_completa: true,
+                resultados: resultados
+            });
+        }
+
+        const tipoConsulta = tipo || 'agendamiento';
+        
+        if (!ONTIMECAR_CONFIG.endpoints[tipoConsulta]) {
+            return res.status(400).json({
+                error: true,
+                mensaje: `Tipo de consulta inválido: ${tipoConsulta}`,
+                tipos_validos: Object.keys(ONTIMECAR_CONFIG.endpoints)
+            });
+        }
+
+        const resultado = await consultarOnTimeCar(cedula, tipoConsulta);
+        res.json(resultado);
+    } catch (error) {
+        console.error('[ERROR]', error);
+        res.status(500).json({
+            error: true,
+            mensaje: 'Error interno del servidor',
+            detalle: error.message
+        });
     }
-    const resultado = await consultarOnTimeCar(cedula, tipoConsulta);
-    res.json(resultado);
-  } catch (error) {
-    console.error('[ERROR]', error);
-    res.status(500).json({ error: true, mensaje: 'Error interno del servidor', detalle: error.message });
-  }
 });
 
-// Columnas info
-app.get('/columnas/:tipo', (req, res) => {
-  const tipo = req.params.tipo;
-  if (!COLUMNAS_POR_TIPO[tipo]) return res.status(404).json({ error: true, mensaje: `Tipo no encontrado: ${tipo}`, tipos_disponibles: Object.keys(COLUMNAS_POR_TIPO) });
-  const config = COLUMNAS_POR_TIPO[tipo];
-  res.json({
-    tipo,
-    columnasOmitidas: config.skip,
-    columnas: config.columnas,
-    totalColumnas: config.columnas.length,
-    descripcion: `Se omiten las primeras ${config.skip} columna(s) de la tabla HTML`
-  });
-});
-
-app.get('/columnas', (req, res) => {
-  const configuraciones = {};
-  Object.keys(COLUMNAS_POR_TIPO).forEach(tipo => {
-    configuraciones[tipo] = {
-      columnasOmitidas: COLUMNAS_POR_TIPO[tipo].skip,
-      columnas: COLUMNAS_POR_TIPO[tipo].columnas,
-      totalColumnas: COLUMNAS_POR_TIPO[tipo].columnas.length
-    };
-  });
-  res.json({ mensaje: 'Configuración de columnas por tipo de consulta', configuraciones });
-});
-
+// Ruta raíz con información del API
 app.get('/', (req, res) => {
-  res.json({
-    servicio: 'OnTimeCar Scraper API',
-    version: '3.2.0-fixed-cedula-filter',
-    tipo: 'Scraper Multi-Endpoint (compatible con N8N)',
-    descripcion: 'Sistema de scraping con mapeo correcto de columnas HTML',
-    endpoints: {
-      health: 'GET /health',
-      agendamiento: 'GET /consulta/agendamiento?cedula=NUMERO',
-      programacion: 'GET /consulta/programacion?cedula=NUMERO',
-      panel: 'GET /consulta/panel?cedula=NUMERO',
-      preautorizaciones: 'GET /consulta/preautorizaciones?cedula=NUMERO',
-      consulta_post: 'POST /consulta (body: { "cedula": "NUMERO", "tipo": "agendamiento|programacion|panel|preautorizaciones" })',
-      ver_columnas: 'GET /columnas/:tipo (preautorizaciones|agendamiento|programacion|panel)',
-      ver_todas_columnas: 'GET /columnas'
-    }
-  });
+    res.json({
+        servicio: 'OnTimeCar Scraper API - CORREGIDO',
+        version: '3.1.0',
+        tipo: 'Scraper Multi-Endpoint Mejorado',
+        mejoras: [
+            'Búsqueda más robusta de campos de filtro',
+            'Múltiples estrategias para encontrar tablas',
+            'Extracción completa de todos los datos disponibles',
+            'Filtrado por cédula en todos los resultados',
+            'Consulta completa en un solo endpoint'
+        ],
+        endpoints: {
+            health: 'GET /health',
+            agendamiento: 'GET /consulta/agendamiento?cedula=NUMERO',
+            programacion: 'GET /consulta/programacion?cedula=NUMERO',
+            panel: 'GET /consulta/panel?cedula=NUMERO',
+            preautorizaciones: 'GET /consulta/preautorizaciones?cedula=NUMERO',
+            completa: 'GET /consulta/completa?cedula=NUMERO',
+            consulta_post: 'POST /consulta (body: { "cedula": "NUMERO", "tipo": "agendamiento|programacion|panel|preautorizaciones", "completa": true|false })'
+        },
+        documentacion: 'Consulta el estado de servicios de On Time Car por cédula en diferentes secciones - Versión Mejorada'
+    });
 });
 
-// 404 handler
+// Manejo de rutas no encontradas
 app.use((req, res) => {
-  res.status(404).json({ error: true, mensaje: 'Endpoint no encontrado', ruta: req.path });
+    res.status(404).json({
+        error: true,
+        mensaje: 'Endpoint no encontrado',
+        ruta: req.path,
+        endpoints_disponibles: [
+            '/health',
+            '/consulta/agendamiento',
+            '/consulta/programacion',
+            '/consulta/panel',
+            '/consulta/preautorizaciones',
+            '/consulta/completa'
+        ]
+    });
 });
 
 // Iniciar servidor
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`\n${'='.repeat(60)}`);
-  console.log(`✅ Servidor OnTimeCar Scraper iniciado`);
-  console.log(`${'='.repeat(60)}`);
-  console.log(`📡 Puerto: ${PORT}`);
-  console.log(`🔐 Usuario: ${ONTIMECAR_CONFIG.username}`);
-  console.log(`\n📋 Configuración de columnas:`);
-  Object.keys(COLUMNAS_POR_TIPO).forEach(tipo => {
-    const config = COLUMNAS_POR_TIPO[tipo];
-    console.log(`   ${tipo.padEnd(20)} → Skip: ${config.skip}, Columnas: ${config.columnas.length}`);
-  });
-  console.log(`\n🌐 Endpoints disponibles:`);
-  console.log(`   - GET  /health`);
-  console.log(`   - GET  /consulta/agendamiento?cedula=NUMERO`);
-  console.log(`   - GET  /consulta/programacion?cedula=NUMERO`);
-  console.log(`   - GET  /consulta/panel?cedula=NUMERO`);
-  console.log(`   - GET  /consulta/preautorizaciones?cedula=NUMERO`);
-  console.log(`   - POST /consulta (body con cedula y tipo)`);
-  console.log(`   - GET  /columnas (ver todas las configuraciones)`);
-  console.log(`${'='.repeat(60)}\n`);
+    console.log(`✅ Servidor OnTimeCar Scraper CORREGIDO iniciado correctamente`);
+    console.log(`📡 Escuchando en puerto ${PORT}`);
+    console.log(`🌐 Endpoints disponibles:`);
+    console.log(`   - GET  /health`);
+    console.log(`   - GET  /consulta/agendamiento?cedula=NUMERO`);
+    console.log(`   - GET  /consulta/programacion?cedula=NUMERO`);
+    console.log(`   - GET  /consulta/panel?cedula=NUMERO`);
+    console.log(`   - GET  /consulta/preautorizaciones?cedula=NUMERO`);
+    console.log(`   - GET  /consulta/completa?cedula=NUMERO (NUEVO)`);
+    console.log(`   - POST /consulta (body con cedula y tipo/completa)`);
+    console.log(`🔐 Credenciales configuradas: ${ONTIMECAR_CONFIG.username}`);
+    console.log(`🚀 Mejoras: Búsqueda robusta, múltiples estrategias, datos completos`);
 });
