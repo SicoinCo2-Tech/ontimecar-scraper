@@ -1,4 +1,4 @@
-// server.js - Scraper Real de OnTimeCar con Puppeteer
+// server.js - Scraper Real de OnTimeCar con Puppeteer MEJORADO
 const express = require('express');
 const puppeteer = require('puppeteer');
 const app = express();
@@ -73,48 +73,92 @@ async function consultarServiciosOnTimeCar(cedula) {
             timeout: 30000 
         });
 
-        // Esperar a que cargue la tabla
-        await page.waitForSelector('table, .table, [class*="table"]', { timeout: 10000 });
+        console.log('[SCRAPER] Esperando a que cargue la tabla...');
+        
+        // Esperar más tiempo para que cargue la tabla con JavaScript
+        await page.waitForTimeout(3000);
+
+        // Intentar con múltiples selectores
+        try {
+            await page.waitForSelector('table tbody tr, .table tbody tr, .dataTable tbody tr', { timeout: 5000 });
+        } catch (e) {
+            console.log('[SCRAPER] No se encontró tabla con los selectores estándar');
+        }
 
         // PASO 3: Extraer datos de la tabla
         console.log('[SCRAPER] Extrayendo datos de la tabla...');
         
         const servicios = await page.evaluate(() => {
-            const filas = Array.from(document.querySelectorAll('table tbody tr, .table tbody tr'));
+            // Intentar con diferentes selectores de tabla
+            const tablas = [
+                document.querySelector('table tbody'),
+                document.querySelector('.table tbody'),
+                document.querySelector('.dataTable tbody'),
+                document.querySelector('[class*="table"] tbody')
+            ].filter(t => t !== null);
+
+            if (tablas.length === 0) {
+                console.log('No se encontró ninguna tabla');
+                return [];
+            }
+
+            const tbody = tablas[0];
+            const filas = Array.from(tbody.querySelectorAll('tr'));
             
-            return filas.map(fila => {
+            console.log(`Encontradas ${filas.length} filas`);
+
+            return filas.map((fila, index) => {
                 const celdas = Array.from(fila.querySelectorAll('td'));
                 
-                // Mapear columnas según la imagen
+                console.log(`Fila ${index}: ${celdas.length} celdas`);
+                
+                if (celdas.length === 0) return null;
+
+                // Extraer texto de cada celda
+                const datos = celdas.map(c => c.innerText?.trim() || '');
+                
+                // Mapear según las columnas de la imagen
                 return {
-                    fechaSolicitud: celdas[1]?.innerText?.trim() || '',
-                    fechaRecepcion: celdas[2]?.innerText?.trim() || '',
-                    tipoDocumento: celdas[3]?.innerText?.trim() || '',
-                    nombre: celdas[4]?.innerText?.trim() || '',
-                    clase: celdas[5]?.innerText?.trim() || '',
-                    numero: celdas[6]?.innerText?.trim() || '',
-                    estado: celdas[7]?.innerText?.trim() || '',
-                    codigo: celdas[8]?.innerText?.trim() || '',
-                    cantidad: celdas[9]?.innerText?.trim() || '',
-                    prescripcion: celdas[10]?.innerText?.trim() || '',
-                    ciudadOrigen: celdas[11]?.innerText?.trim() || '',
-                    direccionOrigen: celdas[12]?.innerText?.trim() || '',
-                    ciudadDestino: celdas[13]?.innerText?.trim() || '',
-                    direccionDestino: celdas[14]?.innerText?.trim() || '',
-                    eps: celdas[15]?.innerText?.trim() || '',
-                    cantidadServicios: celdas[16]?.innerText?.trim() || '',
-                    subirAutorizacion: celdas[17]?.innerText?.trim() || '',
-                    observaciones: celdas[18]?.innerText?.trim() || '',
-                    nombrePaciente: celdas[19]?.innerText?.trim() || '',
-                    parentesco: celdas[20]?.innerText?.trim() || '',
-                    telefonoDocumentoAco: celdas[21]?.innerText?.trim() || '',
-                    numeroDocumentoAco: celdas[22]?.innerText?.trim() || '',
-                    agendamientos: celdas[23]?.innerText?.trim() || ''
+                    accion: datos[0] || '',
+                    fechaSolicitud: datos[1] || '',
+                    fechaRecepcion: datos[2] || '',
+                    tipoDocumento: datos[3] || '',
+                    nombre: datos[4] || '',
+                    clase: datos[5] || '',
+                    numero: datos[6] || '',
+                    estado: datos[7] || '',
+                    codigo: datos[8] || '',
+                    cantidad: datos[9] || '',
+                    prescripcion: datos[10] || '',
+                    ciudadOrigen: datos[11] || '',
+                    direccionOrigen: datos[12] || '',
+                    ciudadDestino: datos[13] || '',
+                    direccionDestino: datos[14] || '',
+                    eps: datos[15] || '',
+                    cantidadServicios: datos[16] || '',
+                    subirAutorizacion: datos[17] || '',
+                    observaciones: datos[18] || '',
+                    nombrePaciente: datos[19] || '',
+                    parentesco: datos[20] || '',
+                    telefonoDocumentoAco: datos[21] || '',
+                    numeroDocumentoAco: datos[22] || '',
+                    agendamientos: datos[23] || ''
                 };
-            }).filter(servicio => servicio.nombre);
+            }).filter(servicio => servicio !== null && servicio.nombre);
         });
 
         console.log(`[SCRAPER] Se encontraron ${servicios.length} servicios`);
+
+        // Si no se encontraron servicios, tomar captura para debugging
+        if (servicios.length === 0) {
+            console.log('[SCRAPER] No se encontraron servicios. Tomando captura para debug...');
+            try {
+                const screenshot = await page.screenshot({ encoding: 'base64', fullPage: true });
+                console.log('[SCRAPER] Captura tomada (base64)');
+            } catch (e) {
+                console.log('[SCRAPER] Error al tomar captura:', e.message);
+            }
+        }
 
         await browser.close();
 
@@ -149,8 +193,8 @@ app.get('/health', (req, res) => {
     res.json({
         status: 'ok',
         mensaje: 'Servidor OnTimeCar Scraper funcionando correctamente',
-        version: '2.0.0',
-        tipo: 'Scraper Real con Puppeteer',
+        version: '2.1.0',
+        tipo: 'Scraper Real con Puppeteer MEJORADO',
         timestamp: new Date().toISOString()
     });
 });
@@ -211,8 +255,8 @@ app.post('/consulta', async (req, res) => {
 app.get('/', (req, res) => {
     res.json({
         servicio: 'OnTimeCar Scraper API',
-        version: '2.0.0',
-        tipo: 'Scraper Real con Puppeteer',
+        version: '2.1.0',
+        tipo: 'Scraper Real con Puppeteer MEJORADO',
         endpoints: {
             health: 'GET /health',
             consulta_get: 'GET /consulta?cedula=NUMERO_CEDULA',
