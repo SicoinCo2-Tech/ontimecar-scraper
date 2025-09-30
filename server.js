@@ -12,13 +12,13 @@ app.use((req, res, next) => {
     next();
 });
 
-// Credenciales de OnTimeCar (DEBE SER VERIFICADO)
+// Credenciales de OnTimeCar
 const ONTIMECAR_CONFIG = {
     loginUrl: 'https://app.ontimecar.co/app/home/',
     username: 'ANDRES',
     password: 'IAResponsable',
     agendamientoUrl: 'https://app.ontimecar.co/app/agendamiento/',
-    // Columna de Cédula/Identificación del USUARIO en la tabla: Índice 4 (Quinta Columna)
+    // Columna de Cédula/Identificación del USUARIO: Índice 4 (Quinta Columna)
     COLUMNA_IDENTIFICACION: 4 
 };
 
@@ -29,7 +29,7 @@ async function consultarAgendamiento(cedula) {
     try {
         console.log(`[SCRAPER] Iniciando consulta de agendamiento para cédula: ${cedula}`);
         
-        // Lanzar navegador con argumentos de estabilidad
+        // 1. Lanzar navegador con argumentos de estabilidad
         browser = await puppeteer.launch({
             headless: 'new',
             args: [
@@ -53,7 +53,7 @@ async function consultarAgendamiento(cedula) {
             timeout: 60000 
         });
 
-        // Escribir credenciales y hacer login
+        // Esperar inputs de login y escribirlos
         const [usernameInput, passwordInput] = await Promise.all([
             page.waitForSelector('input[type="text"], input[name="username"]', { timeout: 15000 }),
             page.waitForSelector('input[type="password"], input[name="password"]', { timeout: 15000 })
@@ -98,7 +98,7 @@ async function consultarAgendamiento(cedula) {
                 const campoBusqueda = await page.$(selector);
                 if (campoBusqueda) {
                     await campoBusqueda.type(cedula, { delay: 100 });
-                    await page.waitForTimeout(5000); 
+                    await page.waitForTimeout(5000); // Dar tiempo para el filtro
                     break;
                 }
             } catch (e) {
@@ -106,10 +106,11 @@ async function consultarAgendamiento(cedula) {
             }
         }
         
-        // PASO 5: Extracción y Filtrado
+        // PASO 5: Extracción y Filtrado (AQUÍ SE USÓ EL CÓDIGO CORREGIDO Y VÁLIDO)
         console.log('[SCRAPER] Extrayendo y filtrando datos...');
         
         const servicios = await page.evaluate((cedulaBuscada, idColumna) => {
+            // El código dentro de evaluate NO debe usar 'await'
             const tabla = document.querySelector('#datatable');
             if (!tabla) return [];
 
@@ -119,12 +120,16 @@ async function consultarAgendamiento(cedula) {
             filas.forEach((fila, index) => {
                 const celdas = Array.from(fila.querySelectorAll('td'));
                 
+                // Mapeo de los textos de las celdas y limpieza
                 const datos = celdas.map(celda => celda.innerText?.trim() || '').map(texto => texto.replace(/\s+/g, ' ').trim());
 
+                // Verificación de columnas mínimas
                 if (datos.length < 20) return; 
 
+                // Extracción de la cédula de la columna esperada
                 const cedulaFila = datos[idColumna] || '';
 
+                // Aplicamos el filtro: Si la cédula coincide
                 if (cedulaFila && cedulaFila.includes(cedulaBuscada)) {
                     
                     const servicio = {
@@ -133,15 +138,15 @@ async function consultarAgendamiento(cedula) {
                         identificacion_usuario: datos[4] || 'N/A', 
                         nombre_usuario: datos[5] || '',
 
-                        // Datos de Ruta (Índices según el HTML)
+                        // Datos de Ruta
                         fechaCita: datos[3] || '',
-                        direccionOrigen: datos[9] || '',   // Índice 9
-                        direccionDestino: datos[11] || '',  // Índice 11
+                        direccionOrigen: datos[9] || '',   // Índice 9: Dirección Origen
+                        direccionDestino: datos[11] || '',  // Índice 11: IPS Destino
                         
                         // Datos de Autorización
                         numeroAutorizacion: datos[12] || '',
                         fechaVigencia: datos[14] || '',
-                        estado: datos[24] || '' // Índice 24
+                        estado: datos[24] || '' // Índice 24: Estado
                     };
                     
                     resultados.push(servicio);
@@ -190,7 +195,7 @@ app.get('/health', (req, res) => {
     res.json({
         status: 'ok',
         mensaje: 'Servidor OnTimeCar Scraper funcionando',
-        version: '1.2.1-fix',
+        version: '1.3.0', // Versión final
         tipo: 'Scraper Agendamiento - Robusto',
         timestamp: new Date().toISOString()
     });
