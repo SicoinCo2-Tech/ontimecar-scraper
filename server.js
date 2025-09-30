@@ -18,7 +18,7 @@ const ONTIMECAR_CONFIG = {
     username: 'ANDRES',
     password: 'IAResponsable',
     agendamientoUrl: 'https://app.ontimecar.co/app/agendamiento/',
-    // Columna de Cédula/Identificación del USUARIO: Índice 4 (Quinta Columna)
+    // Columna de Cédula/Identificación del USUARIO en la tabla: Índice 4 (Quinta Columna)
     COLUMNA_IDENTIFICACION: 4 
 };
 
@@ -75,6 +75,7 @@ async function consultarAgendamiento(cedula) {
         }, ONTIMECAR_CONFIG.username, ONTIMECAR_CONFIG.password);
         
         await page.keyboard.press('Enter');
+        
         await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 60000 });
 
         console.log('[SCRAPER] Login exitoso. Navegando a agendamiento...');
@@ -105,7 +106,7 @@ async function consultarAgendamiento(cedula) {
             }
         }
         
-        // PASO 5: Extraer datos y filtrar por CÉDULA (Lógica corregida)
+        // PASO 5: Extracción y Filtrado
         console.log('[SCRAPER] Extrayendo y filtrando datos...');
         
         const servicios = await page.evaluate((cedulaBuscada, idColumna) => {
@@ -118,16 +119,12 @@ async function consultarAgendamiento(cedula) {
             filas.forEach((fila, index) => {
                 const celdas = Array.from(fila.querySelectorAll('td'));
                 
-                // Mapeo de los textos de las celdas y limpieza
                 const datos = celdas.map(celda => celda.innerText?.trim() || '').map(texto => texto.replace(/\s+/g, ' ').trim());
 
-                // Verificación de columnas mínimas
                 if (datos.length < 20) return; 
 
-                // Extraemos la cédula de la columna esperada
                 const cedulaFila = datos[idColumna] || '';
 
-                // Aplicamos el filtro: Si la cédula coincide (lo que garantiza que la fila es del usuario)
                 if (cedulaFila && cedulaFila.includes(cedulaBuscada)) {
                     
                     const servicio = {
