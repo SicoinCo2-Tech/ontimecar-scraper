@@ -37,8 +37,8 @@ WORKDIR /app
 # Copiar archivos de dependencias
 COPY package*.json ./
 
-# Instalar dependencias de Node.js (comando actualizado)
-RUN npm ci --omit=dev
+# Instalar dependencias directamente
+RUN npm install --production
 
 # Copiar el código de la aplicación
 COPY server.js ./
@@ -56,4 +56,4 @@ USER pptruser
 EXPOSE 3000
 
 # Comando de inicio
-CMD ["node", "server.js"]
+CMD ["node", "server.js"]er.js"]
