@@ -52,7 +52,7 @@ app.get('/consulta/agendamiento', async (req, res) => {
         });
 
         const page = await browser.newPage();
-        await page.setDefaultTimeout(30000);
+        await page.setDefaultTimeout(60000); // Aumentado a 60 segundos
         await page.setViewport({ width: 1920, height: 1080 });
         
         console.log('Navegando a página de login...');
@@ -96,20 +96,34 @@ app.get('/consulta/agendamiento', async (req, res) => {
         
         console.log(`Buscando cédula: ${cedula} en la columna de identificación`);
         
-        // Cambiar el pageLength a -1 para mostrar TODOS los registros
+        // Primero hacer la búsqueda por cédula (esto limita los resultados)
         await page.evaluate((cedula, columnaIndex) => {
             const table = $('#datatable').DataTable();
-            // Mostrar todos los registros (sin paginación)
-            table.page.len(-1).draw();
-            // Búsqueda específica en la columna de identificación
+            // Búsqueda específica en la columna de identificación primero
             table.column(columnaIndex).search(cedula).draw();
         }, cedula, ONTIMECAR_CONFIG.COLUMNA_IDENTIFICACION);
         
-        // Esperar a que la tabla termine de actualizar
+        // Esperar a que la tabla termine de actualizar la búsqueda
         await page.waitForFunction(() => {
             const processingDiv = document.querySelector('.dataTables_processing');
             return !processingDiv || processingDiv.style.display === 'none';
-        }, { timeout: 15000 });
+        }, { timeout: 20000 });
+        
+        await page.waitForTimeout(1000);
+        
+        console.log('Mostrando todos los resultados de la búsqueda...');
+        // Ahora mostrar todos los resultados FILTRADOS (ya solo son de esa cédula)
+        await page.evaluate(() => {
+            const table = $('#datatable').DataTable();
+            // Mostrar todos los registros ya filtrados
+            table.page.len(-1).draw();
+        });
+        
+        // Esperar a que cargue todos los resultados
+        await page.waitForFunction(() => {
+            const processingDiv = document.querySelector('.dataTables_processing');
+            return !processingDiv || processingDiv.style.display === 'none';
+        }, { timeout: 30000 });
         
         // Esperar un poco más para asegurar que el DOM se actualice completamente
         await page.waitForTimeout(2000);
