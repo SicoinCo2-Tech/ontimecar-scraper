@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  ontimecar-scraper:
+    build: .
+    container_name: ontimecar-scraper
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      # Variables de entorno para credenciales (más seguro)
+      - ONTIMECAR_USERNAME=${ONTIMECAR_USERNAME:-ANDRES}
+      - ONTIMECAR_PASSWORD=${ONTIMECAR_PASSWORD:-IAResponsable}
+    restart: unless-stopped
+    mem_limit: 1g
+    cpus: 1
+    security_opt:
+      - seccomp=chrome.json
+    shm_size: 2gb
