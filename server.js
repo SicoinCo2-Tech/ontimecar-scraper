@@ -4,18 +4,16 @@ const puppeteer = require('puppeteer');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Credenciales desde variables de entorno
 const ONTIMECAR_CONFIG = {
     loginUrl: 'https://app.ontimecar.co/app/home/',
     username: process.env.ONTIMECAR_USERNAME || 'ANDRES',
     password: process.env.ONTIMECAR_PASSWORD || 'IAResponsable',
     agendamientoUrl: 'https://app.ontimecar.co/app/agendamientos_panel/',
-    COLUMNA_IDENTIFICACION: 4
+    COLUMNA_IDENTIFICACION: 4 // Índice de la columna de identificación (columna 5 en la vista)
 };
 
 app.use(express.json());
 
-// Endpoint de health check
 app.get('/health', (req, res) => {
     res.json({ 
         status: 'ok', 
@@ -24,7 +22,6 @@ app.get('/health', (req, res) => {
     });
 });
 
-// Endpoint principal para consultar por cédula
 app.get('/consulta/agendamiento', async (req, res) => {
     const cedula = req.query.cedula;
     
@@ -64,7 +61,6 @@ app.get('/consulta/agendamiento', async (req, res) => {
             timeout: 30000 
         });
         
-        // Esperar y llenar formulario de login
         console.log('Esperando formulario de login...');
         await page.waitForSelector('input[name="username"]', { timeout: 10000 });
         
@@ -77,7 +73,6 @@ app.get('/consulta/agendamiento', async (req, res) => {
             page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 })
         ]);
 
-        // Verificar si el login fue exitoso
         const loginSuccess = await page.evaluate(() => {
             return !document.querySelector('input[name="username"]');
         });
@@ -92,58 +87,80 @@ app.get('/consulta/agendamiento', async (req, res) => {
             timeout: 30000 
         });
         
-        // Esperar que la tabla cargue
         console.log('Esperando que cargue la tabla...');
         await page.waitForSelector('#datatable', { timeout: 15000 });
         
-        // Esperar que jQuery y DataTables estén disponibles
         await page.waitForFunction(() => {
             return typeof $ !== 'undefined' && $('#datatable').DataTable;
         }, { timeout: 10000 });
         
-        console.log(`Buscando cédula: ${cedula}`);
-        // Usar la función de búsqueda de DataTables
-        await page.evaluate((cedula) => {
-            $('#datatable').DataTable().search(cedula).draw();
-        }, cedula);
+        console.log(`Buscando cédula: ${cedula} en la columna de identificación`);
         
-        // Esperar que se actualice la tabla
-        await page.waitForTimeout(3000);
+        // Cambiar el pageLength a -1 para mostrar TODOS los registros
+        await page.evaluate((cedula, columnaIndex) => {
+            const table = $('#datatable').DataTable();
+            // Mostrar todos los registros (sin paginación)
+            table.page.len(-1).draw();
+            // Búsqueda específica en la columna de identificación
+            table.column(columnaIndex).search(cedula).draw();
+        }, cedula, ONTIMECAR_CONFIG.COLUMNA_IDENTIFICACION);
         
-        // Extraer los datos de las filas que coinciden
+        // Esperar a que la tabla termine de actualizar
+        await page.waitForFunction(() => {
+            const processingDiv = document.querySelector('.dataTables_processing');
+            return !processingDiv || processingDiv.style.display === 'none';
+        }, { timeout: 15000 });
+        
+        // Esperar un poco más para asegurar que el DOM se actualice completamente
+        await page.waitForTimeout(2000);
+        
         console.log('Extrayendo datos...');
-        const datos = await page.evaluate(() => {
+        const datos = await page.evaluate((columnaIdentificacion) => {
             const rows = document.querySelectorAll('#datatable tbody tr');
             const resultados = [];
             
             rows.forEach(row => {
                 const cells = row.querySelectorAll('td');
                 
-                // Verificar que no sea la fila de "No hay datos"
-                if (cells.length > 1 && !row.classList.contains('dataTables_empty')) {
+                // Verificar que no sea la fila de "No hay datos" y que tenga suficientes columnas
+                if (cells.length > 10 && !row.classList.contains('dataTables_empty')) {
+                    // Función auxiliar para extraer valor de input o texto
+                    const getValue = (cell) => {
+                        if (!cell) return '';
+                        const input = cell.querySelector('input');
+                        if (input) {
+                            // Para inputs tipo date, asegurarse de obtener el valor correcto
+                            if (input.type === 'date' || input.name === 'fecha_convertida') {
+                                return input.value || input.getAttribute('value') || '';
+                            }
+                            return input.value || '';
+                        }
+                        return cell.innerText.trim() || '';
+                    };
+
                     const registro = {
                         sms: cells[2]?.innerText.trim() || '',
-                        fecha_cita: cells[3]?.querySelector('input')?.value || cells[3]?.innerText.trim() || '',
+                        fecha_cita: getValue(cells[3]),
                         identificacion: cells[4]?.innerText.trim() || '',
                         nombre: cells[5]?.innerText.trim() || '',
-                        telefono: cells[6]?.querySelector('input')?.value || cells[6]?.innerText.trim() || '',
-                        zona: cells[7]?.querySelector('input')?.value || cells[7]?.innerText.trim() || '',
+                        telefono: getValue(cells[6]),
+                        zona: getValue(cells[7]),
                         ciudad_origen: cells[8]?.innerText.trim() || '',
-                        direccion_origen: cells[9]?.querySelector('input')?.value || cells[9]?.innerText.trim() || '',
+                        direccion_origen: getValue(cells[9]),
                         ciudad_destino: cells[10]?.innerText.trim() || '',
-                        ips_destino: cells[11]?.querySelector('input')?.value || cells[11]?.innerText.trim() || '',
+                        ips_destino: getValue(cells[11]),
                         numero_autorizacion: cells[12]?.innerText.trim() || '',
                         cantidad_servicios: cells[13]?.innerText.trim() || '',
                         fecha_vigencia: cells[14]?.innerText.trim() || '',
-                        hora_recogida: cells[15]?.querySelector('input')?.value || cells[15]?.innerText.trim() || '',
-                        hora_retorno: cells[16]?.querySelector('input')?.value || cells[16]?.innerText.trim() || '',
-                        nombre_acompanante: cells[17]?.querySelector('input')?.value || cells[17]?.innerText.trim() || '',
-                        identificacion_acompanante: cells[18]?.querySelector('input')?.value || cells[18]?.innerText.trim() || '',
-                        parentesco: cells[19]?.querySelector('input')?.value || cells[19]?.innerText.trim() || '',
-                        telefono_acompanante: cells[20]?.querySelector('input')?.value || cells[20]?.innerText.trim() || '',
+                        hora_recogida: getValue(cells[15]),
+                        hora_retorno: getValue(cells[16]),
+                        nombre_acompanante: getValue(cells[17]),
+                        identificacion_acompanante: getValue(cells[18]),
+                        parentesco: getValue(cells[19]),
+                        telefono_acompanante: getValue(cells[20]),
                         conductor: cells[21]?.innerText.trim() || '',
                         celular_conductor: cells[22]?.innerText.trim() || '',
-                        observaciones: cells[23]?.querySelector('input')?.value || cells[23]?.innerText.trim() || '',
+                        observaciones: getValue(cells[23]),
                         estado: cells[24]?.innerText.trim() || ''
                     };
                     
@@ -152,11 +169,11 @@ app.get('/consulta/agendamiento', async (req, res) => {
             });
             
             return resultados;
-        });
+        }, ONTIMECAR_CONFIG.COLUMNA_IDENTIFICACION);
 
         await browser.close();
         
-        console.log(`Encontrados ${datos.length} registros`);
+        console.log(`Encontrados ${datos.length} registros para cédula: ${cedula}`);
         
         if (datos.length === 0) {
             return res.status(404).json({ 
@@ -176,9 +193,12 @@ app.get('/consulta/agendamiento', async (req, res) => {
 
     } catch (error) {
         console.error(`[${new Date().toISOString()}] Error en el scraper:`, error.message);
+        console.error('Stack trace:', error.stack);
+        
         if (browser) {
             await browser.close();
         }
+        
         res.status(500).json({ 
             error: 'Error al extraer datos', 
             detalle: error.message,
@@ -187,7 +207,6 @@ app.get('/consulta/agendamiento', async (req, res) => {
     }
 });
 
-// Manejo de errores global
 app.use((err, req, res, next) => {
     console.error('Error no manejado:', err);
     res.status(500).json({ 
@@ -209,7 +228,6 @@ app.listen(PORT, () => {
     `);
 });
 
-// Manejo de cierre graceful
 process.on('SIGTERM', () => {
     console.log('SIGTERM recibido, cerrando servidor...');
     process.exit(0);
