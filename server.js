@@ -181,7 +181,7 @@ app.get('/consulta/agendamiento', async (req, res) => {
         await page.waitForTimeout(3000);
         
         console.log('Extrayendo datos...');
-        const datos = await page.evaluate((columnaIdentificacion) => {
+        const datos = await page.evaluate((cedulaBuscada, columnaIdentificacion) => {
             const rows = document.querySelectorAll('#datatable tbody tr');
             const resultados = [];
             
@@ -189,6 +189,14 @@ app.get('/consulta/agendamiento', async (req, res) => {
                 const cells = row.querySelectorAll('td');
                 
                 if (cells.length > 10 && !row.classList.contains('dataTables_empty')) {
+                    // Obtener la identificación de esta fila
+                    const identificacionFila = cells[4]?.innerText.trim() || '';
+                    
+                    // FILTRO: Solo procesar si la identificación coincide exactamente
+                    if (identificacionFila !== cedulaBuscada) {
+                        return; // Saltar esta fila
+                    }
+                    
                     const getValue = (cell) => {
                         if (!cell) return '';
                         const input = cell.querySelector('input');
@@ -232,7 +240,7 @@ app.get('/consulta/agendamiento', async (req, res) => {
             });
             
             return resultados;
-        }, ONTIMECAR_CONFIG.COLUMNA_IDENTIFICACION);
+        }, cedula, ONTIMECAR_CONFIG.COLUMNA_IDENTIFICACION);
 
         await browser.close();
         
