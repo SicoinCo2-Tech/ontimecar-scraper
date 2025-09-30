@@ -1,237 +1,134 @@
-// server.js - Scraper OnTimeCar: ROBUSTEZ Y EXTRACCIÓN GARANTIZADA
 const express = require('express');
 const puppeteer = require('puppeteer');
+
 const app = express();
 const PORT = process.env.PORT || 3000;
-
-app.use(express.json());
-
-// Middleware para logging
-app.use((req, res, next) => {
-    console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
-    next();
-});
 
 // Credenciales de OnTimeCar
 const ONTIMECAR_CONFIG = {
     loginUrl: 'https://app.ontimecar.co/app/home/',
     username: 'ANDRES',
     password: 'IAResponsable',
-    agendamientoUrl: 'https://app.ontimecar.co/app/agendamiento/',
-    // Columna de Cédula/Identificación del USUARIO: Índice 4 (Quinta Columna)
-    COLUMNA_IDENTIFICACION: 4 
+    agendamientoUrl: 'https://app.ontimecar.co/app/agendamientos_panel/',
+    // Columna de identificación del usuario (según el HTML es la 5ta columna)
+    COLUMNA_IDENTIFICACION: 4
 };
 
-// Función de consulta principal
-async function consultarAgendamiento(cedula) {
-    let browser = null;
+app.use(express.json());
+
+// Endpoint para consultar por cédula
+app.get('/consulta/agendamiento', async (req, res) => {
+    const cedula = req.query.cedula;
     
+    if (!cedula) {
+        return res.status(400).json({ error: 'Parámetro cedula requerido' });
+    }
+
+    let browser;
     try {
-        console.log(`[SCRAPER] Iniciando consulta de agendamiento para cédula: ${cedula}`);
+        console.log(`Buscando información para cédula: ${cedula}`);
         
-        // 1. Lanzar navegador con argumentos de estabilidad
         browser = await puppeteer.launch({
-            headless: 'new',
-            args: [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-gpu',
-                '--disable-web-security'
-            ]
+            headless: true,
+            args: ['--no-sandbox', '--disable-setuid-sandbox']
         });
 
         const page = await browser.newPage();
         
-        page.setDefaultTimeout(60000);
-        page.setDefaultNavigationTimeout(60000);
-        await page.setViewport({ width: 1366, height: 768 });
-
-        // PASO 1: Hacer login
-        await page.goto(ONTIMECAR_CONFIG.loginUrl, { 
-            waitUntil: 'networkidle2',
-            timeout: 60000 
-        });
-
-        // Esperar inputs de login y escribirlos
-        const [usernameInput, passwordInput] = await Promise.all([
-            page.waitForSelector('input[type="text"], input[name="username"]', { timeout: 15000 }),
-            page.waitForSelector('input[type="password"], input[name="password"]', { timeout: 15000 })
+        // 1. Login
+        await page.goto(ONTIMECAR_CONFIG.loginUrl, { waitUntil: 'networkidle2' });
+        
+        // Esperar y llenar formulario de login (ajusta los selectores según el HTML real)
+        await page.waitForSelector('input[name="username"]', { timeout: 5000 });
+        await page.type('input[name="username"]', ONTIMECAR_CONFIG.username);
+        await page.type('input[name="password"]', ONTIMECAR_CONFIG.password);
+        
+        // Hacer click en submit
+        await Promise.all([
+            page.click('button[type="submit"]'),
+            page.waitForNavigation({ waitUntil: 'networkidle2' })
         ]);
 
-        if (!usernameInput || !passwordInput) {
-            throw new Error('No se pudieron encontrar los campos de login');
-        }
-
-        await page.evaluate((username, password) => {
-            const userField = document.querySelector('input[type="text"], input[name="username"]');
-            const passField = document.querySelector('input[type="password"], input[name="password"]');
-            
-            if (userField) userField.value = username;
-            if (passField) passField.value = password;
-            
-            const loginButton = document.querySelector('button[type="submit"], input[type="submit"], .login-button');
-            if (loginButton) loginButton.click();
-        }, ONTIMECAR_CONFIG.username, ONTIMECAR_CONFIG.password);
+        // 2. Ir a la página de agendamientos
+        await page.goto(ONTIMECAR_CONFIG.agendamientoUrl, { waitUntil: 'networkidle2' });
         
-        await page.keyboard.press('Enter');
+        // 3. Esperar que la tabla cargue
+        await page.waitForSelector('#datatable', { timeout: 10000 });
         
-        await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 60000 });
-
-        console.log('[SCRAPER] Login exitoso. Navegando a agendamiento...');
-
-        // PASO 2: Navegar a la página de agendamiento
-        await page.goto(ONTIMECAR_CONFIG.agendamientoUrl, { 
-            waitUntil: 'networkidle2',
-            timeout: 60000 
-        });
-
-        // PASO 3: Esperar a que se carguen los datos
-        const selectorTabla = '#datatable tbody tr';
-        await page.waitForSelector(selectorTabla, { timeout: 30000 });
+        // 4. Usar la función de búsqueda de DataTables
+        await page.evaluate((cedula) => {
+            // Acceder a la instancia de DataTable y buscar
+            $('#datatable').DataTable().search(cedula).draw();
+        }, cedula);
         
-        // PASO 4: Usar el campo de búsqueda para filtrar la cédula
-        const selectoresBusqueda = ['.dataTables_filter input', 'input[type="search"]'];
-
-        for (const selector of selectoresBusqueda) {
-            try {
-                const campoBusqueda = await page.$(selector);
-                if (campoBusqueda) {
-                    await campoBusqueda.type(cedula, { delay: 100 });
-                    await page.waitForTimeout(5000); // Dar tiempo para el filtro
-                    break;
-                }
-            } catch (e) {
-                console.log(`[SCRAPER] Falló búsqueda con ${selector}`);
-            }
-        }
+        // Esperar que se actualice la tabla
+        await page.waitForTimeout(2000);
         
-        // PASO 5: Extracción y Filtrado (AQUÍ SE USÓ EL CÓDIGO CORREGIDO Y VÁLIDO)
-        console.log('[SCRAPER] Extrayendo y filtrando datos...');
-        
-        const servicios = await page.evaluate((cedulaBuscada, idColumna) => {
-            // El código dentro de evaluate NO debe usar 'await'
-            const tabla = document.querySelector('#datatable');
-            if (!tabla) return [];
-
-            const filas = Array.from(tabla.querySelectorAll('tbody tr'));
+        // 5. Extraer los datos de la fila que coincide
+        const datos = await page.evaluate(() => {
+            const rows = document.querySelectorAll('#datatable tbody tr');
             const resultados = [];
-
-            filas.forEach((fila, index) => {
-                const celdas = Array.from(fila.querySelectorAll('td'));
-                
-                // Mapeo de los textos de las celdas y limpieza
-                const datos = celdas.map(celda => celda.innerText?.trim() || '').map(texto => texto.replace(/\s+/g, ' ').trim());
-
-                // Verificación de columnas mínimas
-                if (datos.length < 20) return; 
-
-                // Extracción de la cédula de la columna esperada
-                const cedulaFila = datos[idColumna] || '';
-
-                // Aplicamos el filtro: Si la cédula coincide
-                if (cedulaFila && cedulaFila.includes(cedulaBuscada)) {
-                    
-                    const servicio = {
-                        // Datos Generales
-                        fila: index + 1,
-                        identificacion_usuario: datos[4] || 'N/A', 
-                        nombre_usuario: datos[5] || '',
-
-                        // Datos de Ruta
-                        fechaCita: datos[3] || '',
-                        direccionOrigen: datos[9] || '',   // Índice 9: Dirección Origen
-                        direccionDestino: datos[11] || '',  // Índice 11: IPS Destino
-                        
-                        // Datos de Autorización
-                        numeroAutorizacion: datos[12] || '',
-                        fechaVigencia: datos[14] || '',
-                        estado: datos[24] || '' // Índice 24: Estado
-                    };
-                    
-                    resultados.push(servicio);
+            
+            rows.forEach(row => {
+                const cells = row.querySelectorAll('td');
+                if (cells.length > 0) {
+                    resultados.push({
+                        sms: cells[2]?.innerText.trim(),
+                        fecha_cita: cells[3]?.querySelector('input')?.value || cells[3]?.innerText.trim(),
+                        identificacion: cells[4]?.innerText.trim(),
+                        nombre: cells[5]?.innerText.trim(),
+                        telefono: cells[6]?.querySelector('input')?.value || cells[6]?.innerText.trim(),
+                        zona: cells[7]?.querySelector('input')?.value || cells[7]?.innerText.trim(),
+                        ciudad_origen: cells[8]?.innerText.trim(),
+                        direccion_origen: cells[9]?.querySelector('input')?.value || cells[9]?.innerText.trim(),
+                        ciudad_destino: cells[10]?.innerText.trim(),
+                        ips_destino: cells[11]?.querySelector('input')?.value || cells[11]?.innerText.trim(),
+                        numero_autorizacion: cells[12]?.innerText.trim(),
+                        cantidad_servicios: cells[13]?.innerText.trim(),
+                        fecha_vigencia: cells[14]?.innerText.trim(),
+                        hora_recogida: cells[15]?.querySelector('input')?.value || cells[15]?.innerText.trim(),
+                        hora_retorno: cells[16]?.querySelector('input')?.value || cells[16]?.innerText.trim(),
+                        nombre_acompañante: cells[17]?.querySelector('input')?.value || cells[17]?.innerText.trim(),
+                        identificacion_acompañante: cells[18]?.querySelector('input')?.value || cells[18]?.innerText.trim(),
+                        parentesco: cells[19]?.querySelector('input')?.value || cells[19]?.innerText.trim(),
+                        telefono_acompañante: cells[20]?.querySelector('input')?.value || cells[20]?.innerText.trim(),
+                        conductor: cells[21]?.innerText.trim(),
+                        celular_conductor: cells[22]?.innerText.trim(),
+                        observaciones: cells[23]?.querySelector('input')?.value || cells[23]?.innerText.trim(),
+                        estado: cells[24]?.innerText.trim()
+                    });
                 }
             });
-
+            
             return resultados;
-        }, cedula, ONTIMECAR_CONFIG.COLUMNA_IDENTIFICACION);
+        });
 
-        console.log(`[SCRAPER] Se encontraron ${servicios.length} registros válidos`);
-        
         await browser.close();
-
-        return {
-            success: true,
-            tipo: 'agendamiento',
-            cedula: cedula,
-            total: servicios.length,
-            servicios: servicios,
-            mensaje: servicios.length > 0 
-                ? `Se encontraron ${servicios.length} registros en agendamiento para la cédula ${cedula}`
-                : `No se encontraron registros en agendamiento para la cédula ${cedula}`,
-            metodo: 'tabla_principal'
-        };
-
-    } catch (error) {
-        console.error('[ERROR]', error);
         
-        if (browser) {
-            await browser.close();
-        }
-
-        return {
-            success: false,
-            error: true,
-            tipo: 'agendamiento',
-            cedula: cedula,
-            mensaje: `Error al consultar agendamiento: ${error.message}`,
-            detalle: error.stack
-        };
-    }
-}
-
-// Health Check endpoint
-app.get('/health', (req, res) => {
-    res.json({
-        status: 'ok',
-        mensaje: 'Servidor OnTimeCar Scraper funcionando',
-        version: '1.3.0', // Versión final
-        tipo: 'Scraper Agendamiento - Robusto',
-        timestamp: new Date().toISOString()
-    });
-});
-
-// Endpoint principal: Agendamiento (GET)
-app.get('/consulta/agendamiento', async (req, res) => {
-    try {
-        const cedula = req.query.cedula;
-        if (!cedula) {
-            return res.status(400).json({
-                error: true,
-                mensaje: 'El parámetro "cedula" es requerido'
+        if (datos.length === 0) {
+            return res.status(404).json({ 
+                error: 'No se encontraron registros para esta cédula',
+                cedula: cedula 
             });
         }
-        const resultado = await consultarAgendamiento(cedula);
-        res.json(resultado);
+        
+        res.json({
+            cedula: cedula,
+            registros_encontrados: datos.length,
+            datos: datos
+        });
+
     } catch (error) {
-        res.status(500).json({
-            error: true,
-            mensaje: 'Error interno del servidor',
-            detalle: error.message
+        console.error('Error en el scraper:', error);
+        if (browser) await browser.close();
+        res.status(500).json({ 
+            error: 'Error al extraer datos', 
+            detalle: error.message 
         });
     }
 });
 
-// Manejo de rutas no encontradas
-app.use((req, res) => {
-    res.status(404).json({
-        error: true,
-        mensaje: 'Endpoint no encontrado'
-    });
-});
-
-// Iniciar servidor
-app.listen(PORT, '0.0.0.0', () => {
-    console.log(`✅ Servidor OnTimeCar Scraper (Agendamiento) iniciado`);
-    console.log(`📡 Puerto: ${PORT}`);
+app.listen(PORT, () => {
+    console.log(`Servidor corriendo en puerto ${PORT}`);
+    console.log(`Endpoint: http://localhost:${PORT}/consulta/agendamiento?cedula=NUMERO_CEDULA`);
 });
