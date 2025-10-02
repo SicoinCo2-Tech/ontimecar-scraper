@@ -5,15 +5,9 @@ app.get('/health', (req, res) => {
         service: 'OnTimeCar Scraper Optimizado v4.0',
         browser_status: browserPool && browserPool.isConnected() ? 'ready' : 'not_initialized',
         browser_in_use: browserInUse,
-        config: {
-            max_timeout_seconds: CONFIG.maxTimeout / 1000,
-            navigation_timeout_seconds: CONFIG.navigationTimeout / 1000,
-            retry_attempts: CONFIG.retryAttempts
-        },
         endpoints: {
             agendamientos: '/consulta/agendamiento?numero_autorizacion=NUMERO',
-            autorizaciones: '/consulta/autorizacion?numero=NUMERO',
-            diagnostico: '/diagnostico/test-login?plataforma=agendamientos|autorizaciones'
+            autorizaciones: '/consulta/autorizacion?numero=NUMERO'
         }
     });
 });
@@ -56,7 +50,67 @@ app.get('/diagnostico/test-login', async (req, res) => {
         
         logs.push('Intentando login...');
         await loginToOnTimeCar(page, config);
-        logs.push('✓ Login exitoso');const express = require('express');
+        logs.push('✓ Login exitoso');
+        
+        logs.push('Navegando a página objetivo...');
+        await page.goto(config.targetUrl, { 
+            waitUntil: 'domcontentloaded',
+            timeout: CONFIG.navigationTimeout 
+        });
+        logs.push('✓ Página cargada');
+        
+        // Verificar elementos específicos
+        if (plataforma === 'agendamientos') {
+            const hasTable = await page.$(config.tableSelector);
+            logs.push(`Tabla encontrada: ${hasTable ? 'SÍ' : 'NO'}`);
+            
+            const hasDataTable = await page.evaluate(() => {
+                return typeof $ !== 'undefined' && typeof $.fn.DataTable !== 'undefined';
+            });
+            logs.push(`jQuery DataTable disponible: ${hasDataTable ? 'SÍ' : 'NO'}`);
+        } else {
+            const hasGrid = await page.$(config.tableSelector);
+            logs.push(`Grid encontrado: ${hasGrid ? 'SÍ' : 'NO'}`);
+            
+            const hasKendo = await page.evaluate(() => {
+                return typeof kendo !== 'undefined';
+            });
+            logs.push(`Kendo UI disponible: ${hasKendo ? 'SÍ' : 'NO'}`);
+        }
+        
+        await page.close();
+        
+        const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+        
+        res.json({
+            success: true,
+            plataforma: plataforma,
+            duration_seconds: duration,
+            logs: logs,
+            timestamp: new Date().toISOString()
+        });
+
+    } catch (error) {
+        logs.push(`ERROR FATAL: ${error.message}`);
+        
+        if (page) {
+            try { await page.close(); } catch (e) {}
+        }
+        
+        const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+        
+        res.status(500).json({
+            success: false,
+            plataforma: plataforma,
+            error: error.message,
+            duration_seconds: duration,
+            logs: logs,
+            timestamp: new Date().toISOString()
+        });
+    } finally {
+        browserInUse = false;
+    }
+});const express = require('express');
 const puppeteer = require('puppeteer');
 
 const app = express();
@@ -684,6 +738,163 @@ app.post('/admin/reset-browser', async (req, res) => {
         res.json({ success: true, message: 'Navegador reiniciado' });
     } catch (error) {
         res.status(500).json({ error: error.message });
+    }
+});
+
+// Endpoint de diagnóstico
+app.get('/diagnostico/test', async (req, res) => {
+    const plataforma = req.query.plataforma || 'agendamientos';
+    
+    if (!['agendamientos', 'autorizaciones'].includes(plataforma)) {
+        return res.status(400).json({ 
+            error: 'Plataforma debe ser "agendamientos" o "autorizaciones"'
+        });
+    }
+
+    const maxWaitTime = 10000;
+    const startWait = Date.now();
+    
+    while (browserInUse && (Date.now() - startWait) < maxWaitTime) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+    }
+    
+    if (browserInUse) {
+        return res.status(503).json({ 
+            error: 'Servicio ocupado',
+            retry_after_seconds: 5
+        });
+    }
+
+    browserInUse = true;
+    let page;
+    const logs = [];
+    const startTime = Date.now();
+
+    try {
+        const config = ONTIMECAR_CONFIGS[plataforma];
+        logs.push(`[${new Date().toISOString()}] Test para: ${plataforma}`);
+        
+        logs.push('Obteniendo navegador...');
+        const browser = await getBrowser();
+        page = await browser.newPage();
+        
+        await page.setDefaultNavigationTimeout(CONFIG.navigationTimeout);
+        await page.setViewport({ width: 1366, height: 768 });
+        
+        page.on('console', msg => logs.push(`BROWSER: ${msg.text()}`));
+        page.on('pageerror', error => logs.push(`PAGE ERROR: ${error.message}`));
+        
+        logs.push('Iniciando login...');
+        await loginToOnTimeCar(page, config);
+        logs.push('✓ Login completado exitosamente');
+        
+        logs.push(`Navegando a: ${config.targetUrl}`);
+        await page.goto(config.targetUrl, { 
+            waitUntil: 'domcontentloaded',
+            timeout: CONFIG.navigationTimeout 
+        });
+        logs.push('✓ Navegación completada');
+        
+        await page.waitForFunction(() => document.readyState === 'complete', { timeout: 5000 }).catch(() => {
+            logs.push('WARN: document.readyState no llegó a "complete"');
+        });
+        
+        // Verificaciones específicas por plataforma
+        if (plataforma === 'agendamientos') {
+            logs.push('Verificando DataTable...');
+            
+            const hasTable = await page.$(config.tableSelector);
+            logs.push(`- Selector tabla (${config.tableSelector}): ${hasTable ? '✓ ENCONTRADO' : '✗ NO ENCONTRADO'}`);
+            
+            const jQueryAvailable = await page.evaluate(() => typeof $ !== 'undefined');
+            logs.push(`- jQuery disponible: ${jQueryAvailable ? '✓ SÍ' : '✗ NO'}`);
+            
+            if (jQueryAvailable) {
+                const dataTableAvailable = await page.evaluate(() => typeof $.fn.DataTable !== 'undefined');
+                logs.push(`- DataTable plugin: ${dataTableAvailable ? '✓ SÍ' : '✗ NO'}`);
+                
+                if (dataTableAvailable) {
+                    const tableInitialized = await page.evaluate(() => {
+                        try {
+                            return $('#datatable').DataTable() !== undefined;
+                        } catch (e) {
+                            return false;
+                        }
+                    });
+                    logs.push(`- Tabla inicializada: ${tableInitialized ? '✓ SÍ' : '✗ NO'}`);
+                }
+            }
+            
+        } else {
+            logs.push('Verificando Kendo Grid...');
+            
+            const hasGrid = await page.$(config.tableSelector);
+            logs.push(`- Selector grid (${config.tableSelector}): ${hasGrid ? '✓ ENCONTRADO' : '✗ NO ENCONTRADO'}`);
+            
+            const jQueryAvailable = await page.evaluate(() => typeof $ !== 'undefined');
+            logs.push(`- jQuery disponible: ${jQueryAvailable ? '✓ SÍ' : '✗ NO'}`);
+            
+            const kendoAvailable = await page.evaluate(() => typeof kendo !== 'undefined');
+            logs.push(`- Kendo UI disponible: ${kendoAvailable ? '✓ SÍ' : '✗ NO'}`);
+            
+            if (jQueryAvailable && kendoAvailable) {
+                const gridInitialized = await page.evaluate(() => {
+                    try {
+                        return $('#grdAutorizaciones').data('kendoGrid') !== undefined;
+                    } catch (e) {
+                        return false;
+                    }
+                });
+                logs.push(`- Grid inicializado: ${gridInitialized ? '✓ SÍ' : '✗ NO'}`);
+            }
+        }
+        
+        // Capturar HTML de la tabla para debugging
+        const tableHTML = await page.evaluate((selector) => {
+            const table = document.querySelector(selector);
+            return table ? table.outerHTML.substring(0, 500) : 'NO ENCONTRADA';
+        }, config.tableSelector);
+        logs.push(`- HTML preview: ${tableHTML.substring(0, 200)}...`);
+        
+        await page.close();
+        
+        const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+        logs.push(`✓ Test completado en ${duration}s`);
+        
+        res.json({
+            success: true,
+            plataforma: plataforma,
+            duration_seconds: duration,
+            logs: logs,
+            timestamp: new Date().toISOString()
+        });
+
+    } catch (error) {
+        logs.push(`✗ ERROR FATAL: ${error.message}`);
+        logs.push(`Stack: ${error.stack}`);
+        
+        if (page) {
+            try { 
+                const url = await page.url();
+                logs.push(`URL actual: ${url}`);
+                await page.close(); 
+            } catch (e) {
+                logs.push(`Error cerrando página: ${e.message}`);
+            }
+        }
+        
+        const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+        
+        res.status(500).json({
+            success: false,
+            plataforma: plataforma,
+            error: error.message,
+            duration_seconds: duration,
+            logs: logs,
+            timestamp: new Date().toISOString()
+        });
+    } finally {
+        browserInUse = false;
     }
 });
 
