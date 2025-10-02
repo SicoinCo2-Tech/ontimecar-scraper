@@ -9,7 +9,7 @@ const ONTIMECAR_CONFIG = {
     username: process.env.ONTIMECAR_USERNAME || 'ANDRES',
     password: process.env.ONTIMECAR_PASSWORD || 'IAResponsable',
     agendamientoUrl: 'https://app.ontimecar.co/app/agendamientos_panel/',
-    COLUMNA_NUMERO_AUTORIZACION: 12
+    COLUMNA_NUMERO_AUTORIZACION: 12  // Columna 13 en la UI (índice 12)
 };
 
 app.use(express.json());
@@ -18,7 +18,7 @@ app.get('/health', (req, res) => {
     res.json({ 
         status: 'ok', 
         timestamp: new Date().toISOString(),
-        service: 'OnTimeCar Scraper v2.0',
+        service: 'OnTimeCar Scraper v2.3',
         endpoint: '/consulta/agendamiento?numero_autorizacion=NUMERO'
     });
 });
@@ -29,7 +29,7 @@ app.get('/consulta/agendamiento', async (req, res) => {
     if (!numeroAutorizacion) {
         return res.status(400).json({ 
             error: 'Parametro "numero_autorizacion" requerido',
-            ejemplo: '/consulta/agendamiento?numero_autorizacion=279953166',
+            ejemplo: '/consulta/agendamiento?numero_autorizacion=282664703',
             timestamp: new Date().toISOString()
         });
     }
@@ -56,7 +56,7 @@ app.get('/consulta/agendamiento', async (req, res) => {
         });
 
         const page = await browser.newPage();
-        await page.setDefaultTimeout(120000); // Aumentado a 2 minutos
+        await page.setDefaultTimeout(120000);
         await page.setViewport({ width: 1920, height: 1080 });
         
         page.on('console', msg => console.log('Browser:', msg.text()));
@@ -64,18 +64,10 @@ app.get('/consulta/agendamiento', async (req, res) => {
         
         // LOGIN
         console.log('Paso 1: Navegando al login...');
-        try {
-            await page.goto(ONTIMECAR_CONFIG.loginUrl, { 
-                waitUntil: 'domcontentloaded',
-                timeout: 60000 
-            });
-        } catch (e) {
-            console.log('Error en goto login, reintentando...');
-            await page.goto(ONTIMECAR_CONFIG.loginUrl, { 
-                waitUntil: 'load',
-                timeout: 60000 
-            });
-        }
+        await page.goto(ONTIMECAR_CONFIG.loginUrl, { 
+            waitUntil: 'domcontentloaded',
+            timeout: 60000 
+        });
         
         console.log('Paso 2: Esperando formulario de login...');
         await page.waitForSelector('input[name="username"]', { timeout: 30000 });
@@ -86,11 +78,9 @@ app.get('/consulta/agendamiento', async (req, res) => {
         console.log('Paso 3: Enviando credenciales...');
         await page.click('button[type="submit"]');
         
-        // Esperar navegación con múltiples estrategias
         try {
             await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 60000 });
         } catch (e) {
-            console.log('Navegacion lenta, esperando...');
             await page.waitForTimeout(5000);
         }
 
@@ -99,91 +89,56 @@ app.get('/consulta/agendamiento', async (req, res) => {
         });
 
         if (!loginSuccess) {
-            throw new Error('Login fallido - verificar credenciales');
+            throw new Error('Login fallido');
         }
 
         console.log('Paso 4: Login exitoso');
 
-        // NAVEGAR A AGENDAMIENTOS
         console.log('Paso 5: Navegando a agendamientos...');
-        try {
-            await page.goto(ONTIMECAR_CONFIG.agendamientoUrl, { 
-                waitUntil: 'domcontentloaded',
-                timeout: 60000 
-            });
-        } catch (e) {
-            console.log('Error en goto agendamientos, continuando...');
-        }
+        await page.goto(ONTIMECAR_CONFIG.agendamientoUrl, { 
+            waitUntil: 'domcontentloaded',
+            timeout: 60000 
+        });
         
         await page.waitForTimeout(5000);
         
-        // ESPERAR TABLA
-        console.log('Paso 6: Buscando tabla...');
-        
-        const tableFound = await page.evaluate(() => {
-            return document.querySelector('#datatable') !== null;
-        });
-        
-        if (!tableFound) {
-            console.log('Tabla no encontrada inmediatamente, esperando mas...');
-            await page.waitForTimeout(10000);
-        }
-        
+        console.log('Paso 6: Esperando tabla...');
         await page.waitForSelector('#datatable', { timeout: 60000 });
         
-        // ESPERAR JQUERY Y DATATABLE
         console.log('Paso 7: Esperando DataTable...');
-        
         await page.waitForFunction(() => {
             return typeof $ !== 'undefined';
         }, { timeout: 30000 });
         
-        await page.waitForTimeout(3000);
+        await page.waitForTimeout(5000);
         
-        const dtReady = await page.evaluate(() => {
+        // Verificar que DataTable esté listo
+        await page.waitForFunction(() => {
             try {
-                if (typeof $ === 'undefined') return false;
-                const dt = $('#datatable').DataTable();
-                return dt !== undefined;
+                return $('#datatable').DataTable() !== undefined;
             } catch (e) {
                 return false;
             }
-        });
+        }, { timeout: 30000 });
         
-        if (!dtReady) {
-            console.log('DataTable no inicializado, esperando 10s mas...');
-            await page.waitForTimeout(10000);
-        }
+        console.log(`Paso 8: Usando busqueda global para: ${numeroAutorizacion}`);
         
-        // BUSCAR
-        console.log(`Paso 8: Buscando autorizacion ${numeroAutorizacion}...`);
-        
-        await page.evaluate((numAuth, colIndex) => {
-            try {
-                const table = $('#datatable').DataTable();
-                table.column(colIndex).search(numAuth).draw();
-            } catch (e) {
-                console.log('Error en busqueda:', e);
-            }
-        }, numeroAutorizacion, ONTIMECAR_CONFIG.COLUMNA_NUMERO_AUTORIZACION);
+        // Usar búsqueda global de DataTable
+        await page.evaluate((numAuth) => {
+            const table = $('#datatable').DataTable();
+            table.search(numAuth).draw();
+        }, numeroAutorizacion);
         
         await page.waitForTimeout(5000);
         
-        // MOSTRAR TODOS
         console.log('Paso 9: Mostrando todos los resultados...');
-        
         await page.evaluate(() => {
-            try {
-                const table = $('#datatable').DataTable();
-                table.page.len(-1).draw();
-            } catch (e) {
-                console.log('Error mostrando todos:', e);
-            }
+            const table = $('#datatable').DataTable();
+            table.page.len(-1).draw();
         });
         
         await page.waitForTimeout(8000);
         
-        // EXTRAER DATOS
         console.log('Paso 10: Extrayendo datos...');
         
         const datos = await page.evaluate((numAuthBuscado) => {
@@ -194,6 +149,7 @@ app.get('/consulta/agendamiento', async (req, res) => {
                 const cells = row.querySelectorAll('td');
                 
                 if (cells.length > 10 && !row.classList.contains('dataTables_empty')) {
+                    // Verificar columna 13 (índice 12)
                     const numAutorizacionFila = cells[12]?.innerText.trim() || '';
                     
                     if (numAutorizacionFila !== numAuthBuscado) {
@@ -213,6 +169,8 @@ app.get('/consulta/agendamiento', async (req, res) => {
                     };
 
                     const registro = {
+                        acciones: cells[0]?.innerText.trim() || '',
+                        check: cells[1]?.innerText.trim() || '',
                         sms: cells[2]?.innerText.trim() || '',
                         fecha_cita: getValue(cells[3]),
                         identificacion: cells[4]?.innerText.trim() || '',
@@ -247,11 +205,11 @@ app.get('/consulta/agendamiento', async (req, res) => {
 
         await browser.close();
         
-        console.log(`Completado: ${datos.length} registros encontrados`);
+        console.log(`Encontrados ${datos.length} registros`);
         
         if (datos.length === 0) {
             return res.status(404).json({ 
-                error: 'No se encontraron registros para este numero de autorizacion',
+                error: 'No se encontraron registros',
                 numero_autorizacion: numeroAutorizacion,
                 timestamp: new Date().toISOString()
             });
@@ -266,15 +224,12 @@ app.get('/consulta/agendamiento', async (req, res) => {
         });
 
     } catch (error) {
-        console.error(`[${new Date().toISOString()}] Error:`, error.message);
-        console.error('Stack:', error.stack);
+        console.error(`Error: ${error.message}`);
         
         if (browser) {
             try {
                 await browser.close();
-            } catch (closeError) {
-                console.error('Error cerrando browser:', closeError.message);
-            }
+            } catch (e) {}
         }
         
         res.status(500).json({ 
@@ -286,7 +241,6 @@ app.get('/consulta/agendamiento', async (req, res) => {
 });
 
 app.use((err, req, res, next) => {
-    console.error('Error no manejado:', err);
     res.status(500).json({ 
         error: 'Error interno del servidor',
         timestamp: new Date().toISOString()
@@ -296,23 +250,14 @@ app.use((err, req, res, next) => {
 app.listen(PORT, () => {
     console.log(`
 ╔════════════════════════════════════════════════════════════╗
-║           OnTimeCar Scraper v2.1 - ACTIVO                  ║
+║           OnTimeCar Scraper v2.3 - ACTIVO                  ║
 ╠════════════════════════════════════════════════════════════╣
 ║  Puerto: ${PORT}                                            ║
-║  Health: /health                                           ║
 ║  Consulta: /consulta/agendamiento?numero_autorizacion=NUM  ║
-║  Usuario: ${ONTIMECAR_CONFIG.username}                     ║
-║  Timestamp: ${new Date().toISOString()}                    ║
+║  Columna: 13 (indice 12)                                   ║
 ╚════════════════════════════════════════════════════════════╝
     `);
 });
 
-process.on('SIGTERM', () => {
-    console.log('SIGTERM recibido, cerrando servidor...');
-    process.exit(0);
-});
-
-process.on('SIGINT', () => {
-    console.log('SIGINT recibido, cerrando servidor...');
-    process.exit(0);
-});
+process.on('SIGTERM', () => process.exit(0));
+process.on('SIGINT', () => process.exit(0));
