@@ -1,4 +1,62 @@
-const express = require('express');
+app.get('/health', (req, res) => {
+    res.json({ 
+        status: 'ok', 
+        timestamp: new Date().toISOString(),
+        service: 'OnTimeCar Scraper Optimizado v4.0',
+        browser_status: browserPool && browserPool.isConnected() ? 'ready' : 'not_initialized',
+        browser_in_use: browserInUse,
+        config: {
+            max_timeout_seconds: CONFIG.maxTimeout / 1000,
+            navigation_timeout_seconds: CONFIG.navigationTimeout / 1000,
+            retry_attempts: CONFIG.retryAttempts
+        },
+        endpoints: {
+            agendamientos: '/consulta/agendamiento?numero_autorizacion=NUMERO',
+            autorizaciones: '/consulta/autorizacion?numero=NUMERO',
+            diagnostico: '/diagnostico/test-login?plataforma=agendamientos|autorizaciones'
+        }
+    });
+});
+
+// Endpoint de diagnóstico para probar login
+app.get('/diagnostico/test-login', async (req, res) => {
+    const plataforma = req.query.plataforma || 'agendamientos';
+    
+    if (!['agendamientos', 'autorizaciones'].includes(plataforma)) {
+        return res.status(400).json({ 
+            error: 'Plataforma debe ser "agendamientos" o "autorizaciones"'
+        });
+    }
+
+    if (browserInUse) {
+        return res.status(503).json({ 
+            error: 'Servicio ocupado',
+            retry_after_seconds: 5
+        });
+    }
+
+    browserInUse = true;
+    let page;
+    const logs = [];
+    const startTime = Date.now();
+
+    try {
+        const config = ONTIMECAR_CONFIGS[plataforma];
+        logs.push(`Iniciando test de login para: ${plataforma}`);
+        
+        const browser = await getBrowser();
+        page = await browser.newPage();
+        
+        await page.setDefaultNavigationTimeout(CONFIG.navigationTimeout);
+        await page.setViewport({ width: 1366, height: 768 });
+        
+        // Capturar logs del navegador
+        page.on('console', msg => logs.push(`BROWSER: ${msg.text()}`));
+        page.on('pageerror', error => logs.push(`ERROR: ${error.message}`));
+        
+        logs.push('Intentando login...');
+        await loginToOnTimeCar(page, config);
+        logs.push('✓ Login exitoso');const express = require('express');
 const puppeteer = require('puppeteer');
 
 const app = express();
@@ -68,43 +126,68 @@ async function loginToOnTimeCar(page, config, attempt = 1) {
     try {
         console.log(`[Intento ${attempt}] Navegando al login...`);
         
+        // Navegar con múltiples estrategias de espera
         await page.goto(config.loginUrl, { 
-            waitUntil: 'networkidle2',
+            waitUntil: 'domcontentloaded',
             timeout: CONFIG.navigationTimeout 
         });
         
+        // Esperar a que la página esté realmente lista
+        await page.waitForFunction(() => document.readyState === 'complete', { timeout: 5000 }).catch(() => {});
+        
         await page.waitForSelector('input[name="username"]', { timeout: CONFIG.selectorTimeout });
+        
+        // Limpiar campos antes de escribir
+        await page.evaluate(() => {
+            const username = document.querySelector('input[name="username"]');
+            const password = document.querySelector('input[name="password"]');
+            if (username) username.value = '';
+            if (password) password.value = '';
+        });
         
         await page.type('input[name="username"]', config.username, { delay: 30 });
         await page.type('input[name="password"]', config.password, { delay: 30 });
         
+        console.log('Enviando credenciales...');
+        
+        // Click y esperar con timeout más largo
         await Promise.all([
             page.click('button[type="submit"]'),
             page.waitForNavigation({ 
-                waitUntil: 'networkidle2', 
-                timeout: CONFIG.navigationTimeout 
-            }).catch(() => {}) // Ignorar si no hay navegación
+                waitUntil: 'domcontentloaded', 
+                timeout: 40000 
+            }).catch(() => {
+                console.log('No hubo navegación después del login, continuando...');
+            })
         ]);
 
-        // Verificar login exitoso
+        // Dar tiempo extra para que se procese el login
+        await page.waitForTimeout(3000);
+
+        // Verificar login exitoso de múltiples formas
         const loginSuccess = await page.evaluate(() => {
-            return !document.querySelector('input[name="username"]');
+            const hasLoginForm = !!document.querySelector('input[name="username"]');
+            const hasErrorMessage = document.body.innerText.toLowerCase().includes('error') || 
+                                   document.body.innerText.toLowerCase().includes('incorrect');
+            return !hasLoginForm && !hasErrorMessage;
         });
 
         if (!loginSuccess) {
-            throw new Error('Login fallido - credenciales incorrectas');
+            throw new Error('Login fallido - credenciales incorrectas o página no cargó');
         }
 
         console.log('✓ Login exitoso');
         return true;
 
     } catch (error) {
+        console.error(`Error en login (intento ${attempt}):`, error.message);
+        
         if (attempt < CONFIG.retryAttempts) {
-            console.log(`⚠ Error en login, reintentando... (${attempt}/${CONFIG.retryAttempts})`);
-            await page.waitForTimeout(2000);
+            console.log(`⚠ Reintentando login... (${attempt + 1}/${CONFIG.retryAttempts})`);
+            await page.waitForTimeout(3000);
             return loginToOnTimeCar(page, config, attempt + 1);
         }
-        throw error;
+        throw new Error(`Login fallido después de ${CONFIG.retryAttempts} intentos: ${error.message}`);
     }
 }
 
@@ -154,11 +237,18 @@ app.get('/consulta/agendamiento', async (req, res) => {
         });
     }
 
-    // Evitar solicitudes concurrentes
+    // Evitar solicitudes concurrentes con timeout
+    const maxWaitTime = 10000; // 10 segundos máximo esperando
+    const startWait = Date.now();
+    
+    while (browserInUse && (Date.now() - startWait) < maxWaitTime) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+    }
+    
     if (browserInUse) {
         return res.status(503).json({ 
-            error: 'Servicio ocupado, intente de nuevo en unos segundos',
-            retry_after: 5
+            error: 'Servicio ocupado, intente de nuevo',
+            retry_after_seconds: 5
         });
     }
 
@@ -180,10 +270,20 @@ app.get('/consulta/agendamiento', async (req, res) => {
             await page.setDefaultTimeout(CONFIG.selectorTimeout);
             await page.setViewport({ width: 1366, height: 768 });
             
-            // Deshabilitar recursos innecesarios
+            // User agent realista
+            await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+            
+            // Deshabilitar recursos innecesarios SOLO después de login
+            let loginCompleted = false;
             await page.setRequestInterception(true);
             page.on('request', (req) => {
-                if (['image', 'stylesheet', 'font'].includes(req.resourceType())) {
+                // Durante login, permitir todo
+                if (!loginCompleted) {
+                    req.continue();
+                    return;
+                }
+                // Después de login, optimizar
+                if (['image', 'stylesheet', 'font', 'media'].includes(req.resourceType())) {
                     req.abort();
                 } else {
                     req.continue();
@@ -192,25 +292,54 @@ app.get('/consulta/agendamiento', async (req, res) => {
             
             // Login
             await loginToOnTimeCar(page, config);
+            loginCompleted = true;
 
             // Navegar a agendamientos
             console.log('Navegando a agendamientos...');
             await page.goto(config.targetUrl, { 
-                waitUntil: 'networkidle2',
+                waitUntil: 'domcontentloaded',
                 timeout: CONFIG.navigationTimeout 
             });
             
-            // Esperar DataTable
-            await page.waitForSelector(config.tableSelector, { timeout: CONFIG.selectorTimeout });
+            // Esperar que la página esté lista
+            await page.waitForFunction(() => document.readyState === 'complete', { timeout: 10000 }).catch(() => {});
             
-            await page.waitForFunction(() => {
-                return typeof $ !== 'undefined' && $('#datatable').DataTable() !== undefined;
-            }, { timeout: CONFIG.selectorTimeout });
+            // Esperar DataTable con reintentos
+            console.log('Esperando DataTable...');
+            let dataTableReady = false;
+            for (let i = 0; i < 3; i++) {
+                await page.waitForSelector(config.tableSelector, { timeout: CONFIG.selectorTimeout }).catch(() => {});
+                
+                dataTableReady = await page.evaluate(() => {
+                    return typeof $ !== 'undefined' && 
+                           typeof $.fn.DataTable !== 'undefined' &&
+                           $('#datatable').length > 0;
+                }).catch(() => false);
+                
+                if (dataTableReady) {
+                    const hasDataTable = await page.evaluate(() => {
+                        try {
+                            return $('#datatable').DataTable() !== undefined;
+                        } catch (e) {
+                            return false;
+                        }
+                    });
+                    if (hasDataTable) break;
+                }
+                
+                console.log(`DataTable no listo, reintento ${i + 1}/3...`);
+                await page.waitForTimeout(2000);
+            }
+            
+            if (!dataTableReady) {
+                throw new Error('DataTable no se inicializó correctamente');
+            }
             
             // Configurar tabla a 100 filas
-            console.log('Configurando tabla...');
+            console.log('Configurando tabla a 100 filas...');
             await page.evaluate(() => {
-                $('#datatable').DataTable().page.len(100).draw();
+                const table = $('#datatable').DataTable();
+                table.page.len(100).draw();
             });
             
             await page.waitForTimeout(CONFIG.waitAfterPageSize);
@@ -338,10 +467,18 @@ app.get('/consulta/autorizacion', async (req, res) => {
         });
     }
 
+    // Evitar solicitudes concurrentes con timeout
+    const maxWaitTime = 10000;
+    const startWait = Date.now();
+    
+    while (browserInUse && (Date.now() - startWait) < maxWaitTime) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+    }
+    
     if (browserInUse) {
         return res.status(503).json({ 
-            error: 'Servicio ocupado, intente de nuevo en unos segundos',
-            retry_after: 5
+            error: 'Servicio ocupado, intente de nuevo',
+            retry_after_seconds: 5
         });
     }
 
@@ -362,10 +499,17 @@ app.get('/consulta/autorizacion', async (req, res) => {
             await page.setDefaultTimeout(CONFIG.selectorTimeout);
             await page.setViewport({ width: 1366, height: 768 });
             
+            await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+            
             // Optimización de recursos
+            let loginCompleted = false;
             await page.setRequestInterception(true);
             page.on('request', (req) => {
-                if (['image', 'stylesheet', 'font'].includes(req.resourceType())) {
+                if (!loginCompleted) {
+                    req.continue();
+                    return;
+                }
+                if (['image', 'stylesheet', 'font', 'media'].includes(req.resourceType())) {
                     req.abort();
                 } else {
                     req.continue();
@@ -374,25 +518,50 @@ app.get('/consulta/autorizacion', async (req, res) => {
             
             // Login
             await loginToOnTimeCar(page, config);
+            loginCompleted = true;
 
             // Navegar a autorizaciones
             console.log('Navegando a autorizaciones...');
             await page.goto(config.targetUrl, { 
-                waitUntil: 'networkidle2',
+                waitUntil: 'domcontentloaded',
                 timeout: CONFIG.navigationTimeout 
             });
             
-            // Esperar Kendo Grid
-            await page.waitForSelector(config.tableSelector, { timeout: CONFIG.selectorTimeout });
+            await page.waitForFunction(() => document.readyState === 'complete', { timeout: 10000 }).catch(() => {});
             
-            await page.waitForFunction(() => {
-                return typeof $ !== 'undefined' && 
-                       typeof kendo !== 'undefined' &&
-                       $('#grdAutorizaciones').data('kendoGrid') !== undefined;
-            }, { timeout: CONFIG.selectorTimeout });
+            // Esperar Kendo Grid con reintentos
+            console.log('Esperando Kendo Grid...');
+            let kendoReady = false;
+            for (let i = 0; i < 3; i++) {
+                await page.waitForSelector(config.tableSelector, { timeout: CONFIG.selectorTimeout }).catch(() => {});
+                
+                kendoReady = await page.evaluate(() => {
+                    return typeof $ !== 'undefined' && 
+                           typeof kendo !== 'undefined' &&
+                           $('#grdAutorizaciones').length > 0;
+                }).catch(() => false);
+                
+                if (kendoReady) {
+                    const hasGrid = await page.evaluate(() => {
+                        try {
+                            return $('#grdAutorizaciones').data('kendoGrid') !== undefined;
+                        } catch (e) {
+                            return false;
+                        }
+                    });
+                    if (hasGrid) break;
+                }
+                
+                console.log(`Kendo Grid no listo, reintento ${i + 1}/3...`);
+                await page.waitForTimeout(2000);
+            }
+            
+            if (!kendoReady) {
+                throw new Error('Kendo Grid no se inicializó correctamente');
+            }
             
             // Configurar grid
-            console.log('Configurando grid...');
+            console.log('Configurando grid a 100 filas...');
             await page.evaluate(() => {
                 const grid = $('#grdAutorizaciones').data('kendoGrid');
                 if (grid) {
