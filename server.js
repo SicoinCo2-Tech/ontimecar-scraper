@@ -1,129 +1,17 @@
-app.get('/health', (req, res) => {
-    res.json({ 
-        status: 'ok', 
-        timestamp: new Date().toISOString(),
-        service: 'OnTimeCar Scraper Optimizado v4.0',
-        browser_status: browserPool && browserPool.isConnected() ? 'ready' : 'not_initialized',
-        browser_in_use: browserInUse,
-        endpoints: {
-            agendamientos: '/consulta/agendamiento?numero_autorizacion=NUMERO',
-            autorizaciones: '/consulta/autorizacion?numero=NUMERO'
-        }
-    });
-});
-
-// Endpoint de diagnóstico para probar login
-app.get('/diagnostico/test-login', async (req, res) => {
-    const plataforma = req.query.plataforma || 'agendamientos';
-    
-    if (!['agendamientos', 'autorizaciones'].includes(plataforma)) {
-        return res.status(400).json({ 
-            error: 'Plataforma debe ser "agendamientos" o "autorizaciones"'
-        });
-    }
-
-    if (browserInUse) {
-        return res.status(503).json({ 
-            error: 'Servicio ocupado',
-            retry_after_seconds: 5
-        });
-    }
-
-    browserInUse = true;
-    let page;
-    const logs = [];
-    const startTime = Date.now();
-
-    try {
-        const config = ONTIMECAR_CONFIGS[plataforma];
-        logs.push(`Iniciando test de login para: ${plataforma}`);
-        
-        const browser = await getBrowser();
-        page = await browser.newPage();
-        
-        await page.setDefaultNavigationTimeout(CONFIG.navigationTimeout);
-        await page.setViewport({ width: 1366, height: 768 });
-        
-        // Capturar logs del navegador
-        page.on('console', msg => logs.push(`BROWSER: ${msg.text()}`));
-        page.on('pageerror', error => logs.push(`ERROR: ${error.message}`));
-        
-        logs.push('Intentando login...');
-        await loginToOnTimeCar(page, config);
-        logs.push('✓ Login exitoso');
-        
-        logs.push('Navegando a página objetivo...');
-        await page.goto(config.targetUrl, { 
-            waitUntil: 'domcontentloaded',
-            timeout: CONFIG.navigationTimeout 
-        });
-        logs.push('✓ Página cargada');
-        
-        // Verificar elementos específicos
-        if (plataforma === 'agendamientos') {
-            const hasTable = await page.$(config.tableSelector);
-            logs.push(`Tabla encontrada: ${hasTable ? 'SÍ' : 'NO'}`);
-            
-            const hasDataTable = await page.evaluate(() => {
-                return typeof $ !== 'undefined' && typeof $.fn.DataTable !== 'undefined';
-            });
-            logs.push(`jQuery DataTable disponible: ${hasDataTable ? 'SÍ' : 'NO'}`);
-        } else {
-            const hasGrid = await page.$(config.tableSelector);
-            logs.push(`Grid encontrado: ${hasGrid ? 'SÍ' : 'NO'}`);
-            
-            const hasKendo = await page.evaluate(() => {
-                return typeof kendo !== 'undefined';
-            });
-            logs.push(`Kendo UI disponible: ${hasKendo ? 'SÍ' : 'NO'}`);
-        }
-        
-        await page.close();
-        
-        const duration = ((Date.now() - startTime) / 1000).toFixed(2);
-        
-        res.json({
-            success: true,
-            plataforma: plataforma,
-            duration_seconds: duration,
-            logs: logs,
-            timestamp: new Date().toISOString()
-        });
-
-    } catch (error) {
-        logs.push(`ERROR FATAL: ${error.message}`);
-        
-        if (page) {
-            try { await page.close(); } catch (e) {}
-        }
-        
-        const duration = ((Date.now() - startTime) / 1000).toFixed(2);
-        
-        res.status(500).json({
-            success: false,
-            plataforma: plataforma,
-            error: error.message,
-            duration_seconds: duration,
-            logs: logs,
-            timestamp: new Date().toISOString()
-        });
-    } finally {
-        browserInUse = false;
-    }
-});const express = require('express');
-const puppeteer = require('puppeteer');
+import express from 'express';
+import puppeteer from 'puppeteer';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Configuración optimizada
 const CONFIG = {
-    maxTimeout: 90000, // Timeout máximo total por petición
+    maxTimeout: 90000,
     navigationTimeout: 30000,
     selectorTimeout: 15000,
     retryAttempts: 2,
-    waitAfterSearch: 2000, // Reducido de 5000
-    waitAfterPageSize: 1500, // Reducido de 3000
+    waitAfterSearch: 2000,
+    waitAfterPageSize: 1500,
 };
 
 const ONTIMECAR_CONFIGS = {
@@ -147,7 +35,7 @@ const ONTIMECAR_CONFIGS = {
 
 app.use(express.json());
 
-// Pool simple de navegadores para reutilizar
+// Pool de navegadores
 let browserPool = null;
 let browserInUse = false;
 
@@ -175,23 +63,18 @@ async function getBrowser() {
     return browserPool;
 }
 
-// Login optimizado con reintentos
 async function loginToOnTimeCar(page, config, attempt = 1) {
     try {
         console.log(`[Intento ${attempt}] Navegando al login...`);
         
-        // Navegar con múltiples estrategias de espera
         await page.goto(config.loginUrl, { 
             waitUntil: 'domcontentloaded',
             timeout: CONFIG.navigationTimeout 
         });
         
-        // Esperar a que la página esté realmente lista
         await page.waitForFunction(() => document.readyState === 'complete', { timeout: 5000 }).catch(() => {});
-        
         await page.waitForSelector('input[name="username"]', { timeout: CONFIG.selectorTimeout });
         
-        // Limpiar campos antes de escribir
         await page.evaluate(() => {
             const username = document.querySelector('input[name="username"]');
             const password = document.querySelector('input[name="password"]');
@@ -204,7 +87,6 @@ async function loginToOnTimeCar(page, config, attempt = 1) {
         
         console.log('Enviando credenciales...');
         
-        // Click y esperar con timeout más largo
         await Promise.all([
             page.click('button[type="submit"]'),
             page.waitForNavigation({ 
@@ -215,10 +97,8 @@ async function loginToOnTimeCar(page, config, attempt = 1) {
             })
         ]);
 
-        // Dar tiempo extra para que se procese el login
         await page.waitForTimeout(3000);
 
-        // Verificar login exitoso de múltiples formas
         const loginSuccess = await page.evaluate(() => {
             const hasLoginForm = !!document.querySelector('input[name="username"]');
             const hasErrorMessage = document.body.innerText.toLowerCase().includes('error') || 
@@ -245,7 +125,6 @@ async function loginToOnTimeCar(page, config, attempt = 1) {
     }
 }
 
-// Función con timeout global
 async function executeWithTimeout(promise, timeoutMs, errorMessage) {
     let timeoutHandle;
     
@@ -269,18 +148,18 @@ app.get('/health', (req, res) => {
     res.json({ 
         status: 'ok', 
         timestamp: new Date().toISOString(),
-        service: 'OnTimeCar Scraper Optimizado v4.0',
+        service: 'OnTimeCar Scraper Optimizado v4.1',
         browser_status: browserPool && browserPool.isConnected() ? 'ready' : 'not_initialized',
+        browser_in_use: browserInUse,
         endpoints: {
             agendamientos: '/consulta/agendamiento?numero_autorizacion=NUMERO',
-            autorizaciones: '/consulta/autorizacion?numero=NUMERO'
+            autorizaciones: '/consulta/autorizacion?numero=NUMERO',
+            diagnostico: '/diagnostico/test?plataforma=agendamientos',
+            reset: '/admin/reset-browser (POST)'
         }
     });
 });
 
-// ============================================
-// ENDPOINT 1: Agendamientos (OPTIMIZADO)
-// ============================================
 app.get('/consulta/agendamiento', async (req, res) => {
     const numeroAutorizacion = req.query.numero_autorizacion || req.query.autorizacion;
     
@@ -291,8 +170,7 @@ app.get('/consulta/agendamiento', async (req, res) => {
         });
     }
 
-    // Evitar solicitudes concurrentes con timeout
-    const maxWaitTime = 10000; // 10 segundos máximo esperando
+    const maxWaitTime = 10000;
     const startWait = Date.now();
     
     while (browserInUse && (Date.now() - startWait) < maxWaitTime) {
@@ -319,24 +197,19 @@ app.get('/consulta/agendamiento', async (req, res) => {
             const browser = await getBrowser();
             page = await browser.newPage();
             
-            // Configuración de página optimizada
             await page.setDefaultNavigationTimeout(CONFIG.navigationTimeout);
             await page.setDefaultTimeout(CONFIG.selectorTimeout);
             await page.setViewport({ width: 1366, height: 768 });
             
-            // User agent realista
             await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
             
-            // Deshabilitar recursos innecesarios SOLO después de login
             let loginCompleted = false;
             await page.setRequestInterception(true);
             page.on('request', (req) => {
-                // Durante login, permitir todo
                 if (!loginCompleted) {
                     req.continue();
                     return;
                 }
-                // Después de login, optimizar
                 if (['image', 'stylesheet', 'font', 'media'].includes(req.resourceType())) {
                     req.abort();
                 } else {
@@ -344,21 +217,17 @@ app.get('/consulta/agendamiento', async (req, res) => {
                 }
             });
             
-            // Login
             await loginToOnTimeCar(page, config);
             loginCompleted = true;
 
-            // Navegar a agendamientos
             console.log('Navegando a agendamientos...');
             await page.goto(config.targetUrl, { 
                 waitUntil: 'domcontentloaded',
                 timeout: CONFIG.navigationTimeout 
             });
             
-            // Esperar que la página esté lista
             await page.waitForFunction(() => document.readyState === 'complete', { timeout: 10000 }).catch(() => {});
             
-            // Esperar DataTable con reintentos
             console.log('Esperando DataTable...');
             let dataTableReady = false;
             for (let i = 0; i < 3; i++) {
@@ -389,7 +258,6 @@ app.get('/consulta/agendamiento', async (req, res) => {
                 throw new Error('DataTable no se inicializó correctamente');
             }
             
-            // Configurar tabla a 100 filas
             console.log('Configurando tabla a 100 filas...');
             await page.evaluate(() => {
                 const table = $('#datatable').DataTable();
@@ -398,7 +266,6 @@ app.get('/consulta/agendamiento', async (req, res) => {
             
             await page.waitForTimeout(CONFIG.waitAfterPageSize);
             
-            // Buscar
             console.log(`Buscando: ${numeroAutorizacion}`);
             await page.evaluate((numAuth) => {
                 $('#datatable').DataTable().search(numAuth).draw();
@@ -406,7 +273,6 @@ app.get('/consulta/agendamiento', async (req, res) => {
             
             await page.waitForTimeout(CONFIG.waitAfterSearch);
             
-            // Extraer datos
             const datos = await page.evaluate((numAuthBuscado) => {
                 const rows = document.querySelectorAll('#datatable tbody tr');
                 const resultados = [];
@@ -508,9 +374,6 @@ app.get('/consulta/agendamiento', async (req, res) => {
     }
 });
 
-// ============================================
-// ENDPOINT 2: Autorizaciones (OPTIMIZADO)
-// ============================================
 app.get('/consulta/autorizacion', async (req, res) => {
     const numeroAutorizacion = req.query.numero || req.query.numero_autorizacion;
     
@@ -521,7 +384,6 @@ app.get('/consulta/autorizacion', async (req, res) => {
         });
     }
 
-    // Evitar solicitudes concurrentes con timeout
     const maxWaitTime = 10000;
     const startWait = Date.now();
     
@@ -555,7 +417,6 @@ app.get('/consulta/autorizacion', async (req, res) => {
             
             await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
             
-            // Optimización de recursos
             let loginCompleted = false;
             await page.setRequestInterception(true);
             page.on('request', (req) => {
@@ -570,11 +431,9 @@ app.get('/consulta/autorizacion', async (req, res) => {
                 }
             });
             
-            // Login
             await loginToOnTimeCar(page, config);
             loginCompleted = true;
 
-            // Navegar a autorizaciones
             console.log('Navegando a autorizaciones...');
             await page.goto(config.targetUrl, { 
                 waitUntil: 'domcontentloaded',
@@ -583,7 +442,6 @@ app.get('/consulta/autorizacion', async (req, res) => {
             
             await page.waitForFunction(() => document.readyState === 'complete', { timeout: 10000 }).catch(() => {});
             
-            // Esperar Kendo Grid con reintentos
             console.log('Esperando Kendo Grid...');
             let kendoReady = false;
             for (let i = 0; i < 3; i++) {
@@ -614,7 +472,6 @@ app.get('/consulta/autorizacion', async (req, res) => {
                 throw new Error('Kendo Grid no se inicializó correctamente');
             }
             
-            // Configurar grid
             console.log('Configurando grid a 100 filas...');
             await page.evaluate(() => {
                 const grid = $('#grdAutorizaciones').data('kendoGrid');
@@ -626,7 +483,6 @@ app.get('/consulta/autorizacion', async (req, res) => {
             
             await page.waitForTimeout(CONFIG.waitAfterPageSize);
             
-            // Buscar
             console.log(`Buscando: ${numeroAutorizacion}`);
             await page.evaluate((numero) => {
                 const grid = $('#grdAutorizaciones').data('kendoGrid');
@@ -640,7 +496,6 @@ app.get('/consulta/autorizacion', async (req, res) => {
             
             await page.waitForTimeout(CONFIG.waitAfterSearch);
             
-            // Extraer datos
             const datos = await page.evaluate((numBuscado) => {
                 const resultados = [];
                 
@@ -727,7 +582,6 @@ app.get('/consulta/autorizacion', async (req, res) => {
     }
 });
 
-// Endpoint para resetear el navegador si es necesario
 app.post('/admin/reset-browser', async (req, res) => {
     try {
         if (browserPool && browserPool.isConnected()) {
@@ -741,7 +595,6 @@ app.post('/admin/reset-browser', async (req, res) => {
     }
 });
 
-// Endpoint de diagnóstico
 app.get('/diagnostico/test', async (req, res) => {
     const plataforma = req.query.plataforma || 'agendamientos';
     
@@ -799,62 +652,28 @@ app.get('/diagnostico/test', async (req, res) => {
             logs.push('WARN: document.readyState no llegó a "complete"');
         });
         
-        // Verificaciones específicas por plataforma
         if (plataforma === 'agendamientos') {
             logs.push('Verificando DataTable...');
             
             const hasTable = await page.$(config.tableSelector);
-            logs.push(`- Selector tabla (${config.tableSelector}): ${hasTable ? '✓ ENCONTRADO' : '✗ NO ENCONTRADO'}`);
+            logs.push(`- Selector tabla: ${hasTable ? '✓' : '✗'}`);
             
             const jQueryAvailable = await page.evaluate(() => typeof $ !== 'undefined');
-            logs.push(`- jQuery disponible: ${jQueryAvailable ? '✓ SÍ' : '✗ NO'}`);
+            logs.push(`- jQuery: ${jQueryAvailable ? '✓' : '✗'}`);
             
             if (jQueryAvailable) {
                 const dataTableAvailable = await page.evaluate(() => typeof $.fn.DataTable !== 'undefined');
-                logs.push(`- DataTable plugin: ${dataTableAvailable ? '✓ SÍ' : '✗ NO'}`);
-                
-                if (dataTableAvailable) {
-                    const tableInitialized = await page.evaluate(() => {
-                        try {
-                            return $('#datatable').DataTable() !== undefined;
-                        } catch (e) {
-                            return false;
-                        }
-                    });
-                    logs.push(`- Tabla inicializada: ${tableInitialized ? '✓ SÍ' : '✗ NO'}`);
-                }
+                logs.push(`- DataTable plugin: ${dataTableAvailable ? '✓' : '✗'}`);
             }
-            
         } else {
             logs.push('Verificando Kendo Grid...');
             
             const hasGrid = await page.$(config.tableSelector);
-            logs.push(`- Selector grid (${config.tableSelector}): ${hasGrid ? '✓ ENCONTRADO' : '✗ NO ENCONTRADO'}`);
-            
-            const jQueryAvailable = await page.evaluate(() => typeof $ !== 'undefined');
-            logs.push(`- jQuery disponible: ${jQueryAvailable ? '✓ SÍ' : '✗ NO'}`);
+            logs.push(`- Selector grid: ${hasGrid ? '✓' : '✗'}`);
             
             const kendoAvailable = await page.evaluate(() => typeof kendo !== 'undefined');
-            logs.push(`- Kendo UI disponible: ${kendoAvailable ? '✓ SÍ' : '✗ NO'}`);
-            
-            if (jQueryAvailable && kendoAvailable) {
-                const gridInitialized = await page.evaluate(() => {
-                    try {
-                        return $('#grdAutorizaciones').data('kendoGrid') !== undefined;
-                    } catch (e) {
-                        return false;
-                    }
-                });
-                logs.push(`- Grid inicializado: ${gridInitialized ? '✓ SÍ' : '✗ NO'}`);
-            }
+            logs.push(`- Kendo UI: ${kendoAvailable ? '✓' : '✗'}`);
         }
-        
-        // Capturar HTML de la tabla para debugging
-        const tableHTML = await page.evaluate((selector) => {
-            const table = document.querySelector(selector);
-            return table ? table.outerHTML.substring(0, 500) : 'NO ENCONTRADA';
-        }, config.tableSelector);
-        logs.push(`- HTML preview: ${tableHTML.substring(0, 200)}...`);
         
         await page.close();
         
@@ -865,33 +684,23 @@ app.get('/diagnostico/test', async (req, res) => {
             success: true,
             plataforma: plataforma,
             duration_seconds: duration,
-            logs: logs,
-            timestamp: new Date().toISOString()
+            logs: logs
         });
 
     } catch (error) {
-        logs.push(`✗ ERROR FATAL: ${error.message}`);
-        logs.push(`Stack: ${error.stack}`);
+        logs.push(`✗ ERROR: ${error.message}`);
         
         if (page) {
-            try { 
-                const url = await page.url();
-                logs.push(`URL actual: ${url}`);
-                await page.close(); 
-            } catch (e) {
-                logs.push(`Error cerrando página: ${e.message}`);
-            }
+            try { await page.close(); } catch (e) {}
         }
         
         const duration = ((Date.now() - startTime) / 1000).toFixed(2);
         
         res.status(500).json({
             success: false,
-            plataforma: plataforma,
             error: error.message,
             duration_seconds: duration,
-            logs: logs,
-            timestamp: new Date().toISOString()
+            logs: logs
         });
     } finally {
         browserInUse = false;
@@ -905,20 +714,19 @@ app.use((err, req, res, next) => {
 app.listen(PORT, () => {
     console.log(`
 ╔══════════════════════════════════════════════════════════════════╗
-║          OnTimeCar Scraper OPTIMIZADO v4.0 - ACTIVO             ║
+║       OnTimeCar Scraper v4.1 - ACTIVO (ES6 Modules)             ║
 ╠══════════════════════════════════════════════════════════════════╣
 ║  Puerto: ${PORT}                                                  ║
-║  Timeout máximo: ${CONFIG.maxTimeout / 1000}s                                         ║
-║  Reintentos de login: ${CONFIG.retryAttempts}                                           ║
 ╠══════════════════════════════════════════════════════════════════╣
-║  [1] /consulta/agendamiento?numero_autorizacion=NUM             ║
-║  [2] /consulta/autorizacion?numero=NUM                          ║
-║  [3] /admin/reset-browser (POST)                                ║
+║  /consulta/agendamiento?numero_autorizacion=NUM                 ║
+║  /consulta/autorizacion?numero=NUM                              ║
+║  /diagnostico/test?plataforma=agendamientos                     ║
+║  /admin/reset-browser (POST)                                    ║
+║  /health                                                         ║
 ╚══════════════════════════════════════════════════════════════════╝
     `);
 });
 
-// Limpieza al cerrar
 process.on('SIGTERM', async () => {
     if (browserPool) await browserPool.close();
     process.exit(0);
