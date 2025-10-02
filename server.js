@@ -9,7 +9,7 @@ const ONTIMECAR_CONFIG = {
     username: process.env.ONTIMECAR_USERNAME || 'ANDRES',
     password: process.env.ONTIMECAR_PASSWORD || 'IAResponsable',
     agendamientoUrl: 'https://app.ontimecar.co/app/agendamientos_panel/',
-    COLUMNA_NUMERO_AUTORIZACION: 12  // Cambiado de COLUMNA_IDENTIFICACION a esto
+    COLUMNA_NUMERO_AUTORIZACION: 12
 };
 
 app.use(express.json());
@@ -18,24 +18,25 @@ app.get('/health', (req, res) => {
     res.json({ 
         status: 'ok', 
         timestamp: new Date().toISOString(),
-        service: 'OnTimeCar Scraper'
+        service: 'OnTimeCar Scraper v2.0',
+        endpoint: '/consulta/agendamiento?numero_autorizacion=NUMERO'
     });
 });
 
-// ENDPOINT MODIFICADO: ahora busca por número de autorización
 app.get('/consulta/agendamiento', async (req, res) => {
     const numeroAutorizacion = req.query.numero_autorizacion || req.query.autorizacion;
     
     if (!numeroAutorizacion) {
         return res.status(400).json({ 
-            error: 'Parámetro numero_autorizacion requerido',
-            ejemplo: '/consulta/agendamiento?numero_autorizacion=123456'
+            error: 'Parametro "numero_autorizacion" requerido',
+            ejemplo: '/consulta/agendamiento?numero_autorizacion=279953166',
+            timestamp: new Date().toISOString()
         });
     }
 
     let browser;
     try {
-        console.log(`[${new Date().toISOString()}] Buscando información para autorización: ${numeroAutorizacion}`);
+        console.log(`[${new Date().toISOString()}] Buscando autorizacion: ${numeroAutorizacion}`);
         
         browser = await puppeteer.launch({
             headless: true,
@@ -48,7 +49,8 @@ app.get('/consulta/agendamiento', async (req, res) => {
                 '--no-first-run',
                 '--no-zygote',
                 '--disable-gpu',
-                '--disable-extensions'
+                '--disable-extensions',
+                '--disable-software-rasterizer'
             ]
         });
 
@@ -56,22 +58,19 @@ app.get('/consulta/agendamiento', async (req, res) => {
         await page.setDefaultTimeout(90000);
         await page.setViewport({ width: 1920, height: 1080 });
         
-        page.on('console', msg => console.log('Browser console:', msg.text()));
+        page.on('console', msg => console.log('Browser:', msg.text()));
         page.on('pageerror', error => console.log('Browser error:', error.message));
         
-        console.log('Navegando a página de login...');
+        console.log('Iniciando sesion...');
         await page.goto(ONTIMECAR_CONFIG.loginUrl, { 
             waitUntil: 'networkidle2',
             timeout: 45000 
         });
         
-        console.log('Esperando formulario de login...');
         await page.waitForSelector('input[name="username"]', { timeout: 15000 });
-        
         await page.type('input[name="username"]', ONTIMECAR_CONFIG.username);
         await page.type('input[name="password"]', ONTIMECAR_CONFIG.password);
         
-        console.log('Iniciando sesión...');
         await Promise.all([
             page.click('button[type="submit"]'),
             page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 45000 })
@@ -85,7 +84,9 @@ app.get('/consulta/agendamiento', async (req, res) => {
             throw new Error('Login fallido - verificar credenciales');
         }
 
-        console.log('Login exitoso, navegando a agendamientos...');
+        console.log('Login exitoso');
+
+        console.log('Navegando a agendamientos...');
         await page.goto(ONTIMECAR_CONFIG.agendamientoUrl, { 
             waitUntil: 'domcontentloaded',
             timeout: 45000 
@@ -93,27 +94,20 @@ app.get('/consulta/agendamiento', async (req, res) => {
         
         await page.waitForTimeout(3000);
         
-        console.log('Esperando que cargue la tabla...');
+        console.log('Esperando tabla DataTable...');
         
         const tableSelector = await page.evaluate(() => {
             if (document.querySelector('#datatable')) return '#datatable';
             if (document.querySelector('table.dataTable')) return 'table.dataTable';
             if (document.querySelector('.dataTables_wrapper table')) return '.dataTables_wrapper table';
-            if (document.querySelector('table')) {
-                const tables = document.querySelectorAll('table');
-                for (let table of tables) {
-                    if (table.querySelector('tbody tr')) return 'table';
-                }
-            }
             return null;
         });
         
         if (!tableSelector) {
             await page.screenshot({ path: '/tmp/error-page.png', fullPage: true });
-            throw new Error('No se encontró la tabla de agendamientos en la página');
+            throw new Error('No se encontro la tabla de agendamientos');
         }
         
-        console.log(`Tabla encontrada con selector: ${tableSelector}`);
         await page.waitForSelector(tableSelector, { timeout: 30000 });
         
         await page.waitForFunction(() => {
@@ -122,8 +116,7 @@ app.get('/consulta/agendamiento', async (req, res) => {
         
         const isDataTableReady = await page.evaluate(() => {
             try {
-                const table = $('#datatable').DataTable();
-                return table !== undefined;
+                return $('#datatable').DataTable() !== undefined;
             } catch (e) {
                 return false;
             }
@@ -131,23 +124,10 @@ app.get('/consulta/agendamiento', async (req, res) => {
         
         if (!isDataTableReady) {
             await page.waitForTimeout(5000);
-            const retryReady = await page.evaluate(() => {
-                try {
-                    const table = $('#datatable').DataTable();
-                    return table !== undefined;
-                } catch (e) {
-                    return false;
-                }
-            });
-            
-            if (!retryReady) {
-                throw new Error('DataTable no se inicializó correctamente');
-            }
         }
         
-        console.log(`Buscando número de autorización: ${numeroAutorizacion} en la columna 12`);
+        console.log(`Filtrando por autorizacion: ${numeroAutorizacion}`);
         
-        // CAMBIO PRINCIPAL: Buscar en la columna de número de autorización
         await page.evaluate((numAuth, columnaIndex) => {
             const table = $('#datatable').DataTable();
             table.column(columnaIndex).search(numAuth).draw();
@@ -160,7 +140,6 @@ app.get('/consulta/agendamiento', async (req, res) => {
         
         await page.waitForTimeout(2000);
         
-        console.log('Mostrando todos los resultados de la búsqueda...');
         await page.evaluate(() => {
             const table = $('#datatable').DataTable();
             table.page.len(-1).draw();
@@ -173,7 +152,7 @@ app.get('/consulta/agendamiento', async (req, res) => {
         
         await page.waitForTimeout(3000);
         
-        console.log('Extrayendo datos...');
+        console.log('Extrayendo datos de la tabla...');
         const datos = await page.evaluate((numAuthBuscado) => {
             const rows = document.querySelectorAll('#datatable tbody tr');
             const resultados = [];
@@ -182,10 +161,8 @@ app.get('/consulta/agendamiento', async (req, res) => {
                 const cells = row.querySelectorAll('td');
                 
                 if (cells.length > 10 && !row.classList.contains('dataTables_empty')) {
-                    // Obtener el número de autorización de esta fila
                     const numAutorizacionFila = cells[12]?.innerText.trim() || '';
                     
-                    // FILTRO: Solo procesar si el número de autorización coincide exactamente
                     if (numAutorizacionFila !== numAuthBuscado) {
                         return;
                     }
@@ -237,11 +214,11 @@ app.get('/consulta/agendamiento', async (req, res) => {
 
         await browser.close();
         
-        console.log(`Encontrados ${datos.length} registros para autorización: ${numeroAutorizacion}`);
+        console.log(`Encontrados ${datos.length} registros`);
         
         if (datos.length === 0) {
             return res.status(404).json({ 
-                error: 'No se encontraron registros para este número de autorización',
+                error: 'No se encontraron registros para este numero de autorizacion',
                 numero_autorizacion: numeroAutorizacion,
                 timestamp: new Date().toISOString()
             });
@@ -256,8 +233,8 @@ app.get('/consulta/agendamiento', async (req, res) => {
         });
 
     } catch (error) {
-        console.error(`[${new Date().toISOString()}] Error en el scraper:`, error.message);
-        console.error('Stack trace:', error.stack);
+        console.error(`[${new Date().toISOString()}] Error:`, error.message);
+        console.error('Stack:', error.stack);
         
         if (browser) {
             try {
@@ -286,11 +263,12 @@ app.use((err, req, res, next) => {
 app.listen(PORT, () => {
     console.log(`
 ╔════════════════════════════════════════════════════════════╗
-║           OnTimeCar Scraper - INICIADO                     ║
+║           OnTimeCar Scraper v2.0 - ACTIVO                  ║
 ╠════════════════════════════════════════════════════════════╣
 ║  Puerto: ${PORT}                                            ║
-║  Endpoint: /consulta/agendamiento?numero_autorizacion=NUM  ║
-║  Health Check: /health                                     ║
+║  Health: /health                                           ║
+║  Consulta: /consulta/agendamiento?numero_autorizacion=NUM  ║
+║  Usuario: ${ONTIMECAR_CONFIG.username}                     ║
 ║  Timestamp: ${new Date().toISOString()}                    ║
 ╚════════════════════════════════════════════════════════════╝
     `);
