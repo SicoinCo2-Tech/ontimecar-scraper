@@ -9,7 +9,7 @@ const ONTIMECAR_CONFIG = {
     username: process.env.ONTIMECAR_USERNAME || 'ANDRES',
     password: process.env.ONTIMECAR_PASSWORD || 'IAResponsable',
     agendamientoUrl: 'https://app.ontimecar.co/app/agendamientos_panel/',
-    COLUMNA_IDENTIFICACION: 4
+    COLUMNA_NUMERO_AUTORIZACION: 12  // Cambiado de COLUMNA_IDENTIFICACION a esto
 };
 
 app.use(express.json());
@@ -22,19 +22,20 @@ app.get('/health', (req, res) => {
     });
 });
 
+// ENDPOINT MODIFICADO: ahora busca por número de autorización
 app.get('/consulta/agendamiento', async (req, res) => {
-    const cedula = req.query.cedula;
+    const numeroAutorizacion = req.query.numero_autorizacion || req.query.autorizacion;
     
-    if (!cedula) {
+    if (!numeroAutorizacion) {
         return res.status(400).json({ 
-            error: 'Parámetro cedula requerido',
-            ejemplo: '/consulta/agendamiento?cedula=123456789'
+            error: 'Parámetro numero_autorizacion requerido',
+            ejemplo: '/consulta/agendamiento?numero_autorizacion=123456'
         });
     }
 
     let browser;
     try {
-        console.log(`[${new Date().toISOString()}] Buscando información para cédula: ${cedula}`);
+        console.log(`[${new Date().toISOString()}] Buscando información para autorización: ${numeroAutorizacion}`);
         
         browser = await puppeteer.launch({
             headless: true,
@@ -52,10 +53,9 @@ app.get('/consulta/agendamiento', async (req, res) => {
         });
 
         const page = await browser.newPage();
-        await page.setDefaultTimeout(90000); // Aumentado a 90 segundos
+        await page.setDefaultTimeout(90000);
         await page.setViewport({ width: 1920, height: 1080 });
         
-        // Configurar eventos para debugging
         page.on('console', msg => console.log('Browser console:', msg.text()));
         page.on('pageerror', error => console.log('Browser error:', error.message));
         
@@ -91,12 +91,10 @@ app.get('/consulta/agendamiento', async (req, res) => {
             timeout: 45000 
         });
         
-        // Esperar más tiempo para recursos adicionales
         await page.waitForTimeout(3000);
         
         console.log('Esperando que cargue la tabla...');
         
-        // Intentar múltiples selectores posibles
         const tableSelector = await page.evaluate(() => {
             if (document.querySelector('#datatable')) return '#datatable';
             if (document.querySelector('table.dataTable')) return 'table.dataTable';
@@ -111,7 +109,6 @@ app.get('/consulta/agendamiento', async (req, res) => {
         });
         
         if (!tableSelector) {
-            // Tomar screenshot para debugging
             await page.screenshot({ path: '/tmp/error-page.png', fullPage: true });
             throw new Error('No se encontró la tabla de agendamientos en la página');
         }
@@ -119,12 +116,10 @@ app.get('/consulta/agendamiento', async (req, res) => {
         console.log(`Tabla encontrada con selector: ${tableSelector}`);
         await page.waitForSelector(tableSelector, { timeout: 30000 });
         
-        // Esperar a que DataTables se inicialice
         await page.waitForFunction(() => {
             return typeof $ !== 'undefined' && $('#datatable').length > 0;
         }, { timeout: 20000 });
         
-        // Verificar si DataTable está inicializado
         const isDataTableReady = await page.evaluate(() => {
             try {
                 const table = $('#datatable').DataTable();
@@ -135,7 +130,6 @@ app.get('/consulta/agendamiento', async (req, res) => {
         });
         
         if (!isDataTableReady) {
-            // Esperar más tiempo y reintentar
             await page.waitForTimeout(5000);
             const retryReady = await page.evaluate(() => {
                 try {
@@ -151,15 +145,14 @@ app.get('/consulta/agendamiento', async (req, res) => {
             }
         }
         
-        console.log(`Buscando cédula: ${cedula} en la columna de identificación`);
+        console.log(`Buscando número de autorización: ${numeroAutorizacion} en la columna 12`);
         
-        // Búsqueda por cédula
-        await page.evaluate((cedula, columnaIndex) => {
+        // CAMBIO PRINCIPAL: Buscar en la columna de número de autorización
+        await page.evaluate((numAuth, columnaIndex) => {
             const table = $('#datatable').DataTable();
-            table.column(columnaIndex).search(cedula).draw();
-        }, cedula, ONTIMECAR_CONFIG.COLUMNA_IDENTIFICACION);
+            table.column(columnaIndex).search(numAuth).draw();
+        }, numeroAutorizacion, ONTIMECAR_CONFIG.COLUMNA_NUMERO_AUTORIZACION);
         
-        // Esperar a que termine el procesamiento
         await page.waitForFunction(() => {
             const processingDiv = document.querySelector('.dataTables_processing');
             return !processingDiv || processingDiv.style.display === 'none';
@@ -181,7 +174,7 @@ app.get('/consulta/agendamiento', async (req, res) => {
         await page.waitForTimeout(3000);
         
         console.log('Extrayendo datos...');
-        const datos = await page.evaluate((cedulaBuscada, columnaIdentificacion) => {
+        const datos = await page.evaluate((numAuthBuscado) => {
             const rows = document.querySelectorAll('#datatable tbody tr');
             const resultados = [];
             
@@ -189,12 +182,12 @@ app.get('/consulta/agendamiento', async (req, res) => {
                 const cells = row.querySelectorAll('td');
                 
                 if (cells.length > 10 && !row.classList.contains('dataTables_empty')) {
-                    // Obtener la identificación de esta fila
-                    const identificacionFila = cells[4]?.innerText.trim() || '';
+                    // Obtener el número de autorización de esta fila
+                    const numAutorizacionFila = cells[12]?.innerText.trim() || '';
                     
-                    // FILTRO: Solo procesar si la identificación coincide exactamente
-                    if (identificacionFila !== cedulaBuscada) {
-                        return; // Saltar esta fila
+                    // FILTRO: Solo procesar si el número de autorización coincide exactamente
+                    if (numAutorizacionFila !== numAuthBuscado) {
+                        return;
                     }
                     
                     const getValue = (cell) => {
@@ -240,23 +233,23 @@ app.get('/consulta/agendamiento', async (req, res) => {
             });
             
             return resultados;
-        }, cedula, ONTIMECAR_CONFIG.COLUMNA_IDENTIFICACION);
+        }, numeroAutorizacion);
 
         await browser.close();
         
-        console.log(`Encontrados ${datos.length} registros para cédula: ${cedula}`);
+        console.log(`Encontrados ${datos.length} registros para autorización: ${numeroAutorizacion}`);
         
         if (datos.length === 0) {
             return res.status(404).json({ 
-                error: 'No se encontraron registros para esta cédula',
-                cedula: cedula,
+                error: 'No se encontraron registros para este número de autorización',
+                numero_autorizacion: numeroAutorizacion,
                 timestamp: new Date().toISOString()
             });
         }
         
         res.json({
             success: true,
-            cedula: cedula,
+            numero_autorizacion: numeroAutorizacion,
             registros_encontrados: datos.length,
             datos: datos,
             timestamp: new Date().toISOString()
@@ -296,7 +289,7 @@ app.listen(PORT, () => {
 ║           OnTimeCar Scraper - INICIADO                     ║
 ╠════════════════════════════════════════════════════════════╣
 ║  Puerto: ${PORT}                                            ║
-║  Endpoint: /consulta/agendamiento?cedula=NUMERO            ║
+║  Endpoint: /consulta/agendamiento?numero_autorizacion=NUM  ║
 ║  Health Check: /health                                     ║
 ║  Timestamp: ${new Date().toISOString()}                    ║
 ╚════════════════════════════════════════════════════════════╝
