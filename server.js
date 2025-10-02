@@ -1,10 +1,7 @@
 import express from 'express';
 import puppeteer from 'puppeteer';
 
-const app = express();
-const PORT = process.env.PORT || 3000;
-
-// Configuración optimizada
+// Configuración
 const CONFIG = {
     maxTimeout: 90000,
     navigationTimeout: 30000,
@@ -33,12 +30,11 @@ const ONTIMECAR_CONFIGS = {
     }
 };
 
-app.use(express.json());
-
-// Pool de navegadores
+// Variables globales
 let browserPool = null;
 let browserInUse = false;
 
+// Funciones auxiliares
 async function getBrowser() {
     if (!browserPool || !browserPool.isConnected()) {
         browserPool = await puppeteer.launch({
@@ -107,7 +103,7 @@ async function loginToOnTimeCar(page, config, attempt = 1) {
         });
 
         if (!loginSuccess) {
-            throw new Error('Login fallido - credenciales incorrectas o página no cargó');
+            throw new Error('Login fallido');
         }
 
         console.log('✓ Login exitoso');
@@ -121,7 +117,7 @@ async function loginToOnTimeCar(page, config, attempt = 1) {
             await page.waitForTimeout(3000);
             return loginToOnTimeCar(page, config, attempt + 1);
         }
-        throw new Error(`Login fallido después de ${CONFIG.retryAttempts} intentos: ${error.message}`);
+        throw new Error(`Login fallido: ${error.message}`);
     }
 }
 
@@ -130,7 +126,7 @@ async function executeWithTimeout(promise, timeoutMs, errorMessage) {
     
     const timeoutPromise = new Promise((_, reject) => {
         timeoutHandle = setTimeout(() => {
-            reject(new Error(errorMessage || `Operación excedió ${timeoutMs}ms`));
+            reject(new Error(errorMessage || `Timeout ${timeoutMs}ms`));
         }, timeoutMs);
     });
 
@@ -144,11 +140,18 @@ async function executeWithTimeout(promise, timeoutMs, errorMessage) {
     }
 }
 
+// Crear aplicación Express
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+app.use(express.json());
+
+// Rutas
 app.get('/health', (req, res) => {
     res.json({ 
         status: 'ok', 
         timestamp: new Date().toISOString(),
-        service: 'OnTimeCar Scraper Optimizado v4.1',
+        service: 'OnTimeCar Scraper v4.2',
         browser_status: browserPool && browserPool.isConnected() ? 'ready' : 'not_initialized',
         browser_in_use: browserInUse,
         endpoints: {
@@ -165,8 +168,7 @@ app.get('/consulta/agendamiento', async (req, res) => {
     
     if (!numeroAutorizacion) {
         return res.status(400).json({ 
-            error: 'Parametro "numero_autorizacion" requerido',
-            ejemplo: '/consulta/agendamiento?numero_autorizacion=282664703'
+            error: 'Parametro "numero_autorizacion" requerido'
         });
     }
 
@@ -179,7 +181,7 @@ app.get('/consulta/agendamiento', async (req, res) => {
     
     if (browserInUse) {
         return res.status(503).json({ 
-            error: 'Servicio ocupado, intente de nuevo',
+            error: 'Servicio ocupado',
             retry_after_seconds: 5
         });
     }
@@ -255,10 +257,10 @@ app.get('/consulta/agendamiento', async (req, res) => {
             }
             
             if (!dataTableReady) {
-                throw new Error('DataTable no se inicializó correctamente');
+                throw new Error('DataTable no se inicializó');
             }
             
-            console.log('Configurando tabla a 100 filas...');
+            console.log('Configurando tabla...');
             await page.evaluate(() => {
                 const table = $('#datatable').DataTable();
                 table.page.len(100).draw();
@@ -332,11 +334,11 @@ app.get('/consulta/agendamiento', async (req, res) => {
         const datos = await executeWithTimeout(
             scrapingTask(),
             CONFIG.maxTimeout,
-            'Tiempo máximo de consulta excedido'
+            'Timeout excedido'
         );
         
         const duration = ((Date.now() - startTime) / 1000).toFixed(2);
-        console.log(`✓ Completado en ${duration}s - ${datos.length} registros`);
+        console.log(`✓ Completado: ${duration}s - ${datos.length} registros`);
         
         if (datos.length === 0) {
             return res.status(404).json({ 
@@ -379,8 +381,7 @@ app.get('/consulta/autorizacion', async (req, res) => {
     
     if (!numeroAutorizacion) {
         return res.status(400).json({ 
-            error: 'Parametro "numero" requerido',
-            ejemplo: '/consulta/autorizacion?numero=282482633'
+            error: 'Parametro "numero" requerido'
         });
     }
 
@@ -393,7 +394,7 @@ app.get('/consulta/autorizacion', async (req, res) => {
     
     if (browserInUse) {
         return res.status(503).json({ 
-            error: 'Servicio ocupado, intente de nuevo',
+            error: 'Servicio ocupado',
             retry_after_seconds: 5
         });
     }
@@ -415,7 +416,7 @@ app.get('/consulta/autorizacion', async (req, res) => {
             await page.setDefaultTimeout(CONFIG.selectorTimeout);
             await page.setViewport({ width: 1366, height: 768 });
             
-            await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+            await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
             
             let loginCompleted = false;
             await page.setRequestInterception(true);
@@ -464,15 +465,15 @@ app.get('/consulta/autorizacion', async (req, res) => {
                     if (hasGrid) break;
                 }
                 
-                console.log(`Kendo Grid no listo, reintento ${i + 1}/3...`);
+                console.log(`Kendo no listo, reintento ${i + 1}/3...`);
                 await page.waitForTimeout(2000);
             }
             
             if (!kendoReady) {
-                throw new Error('Kendo Grid no se inicializó correctamente');
+                throw new Error('Kendo Grid no se inicializó');
             }
             
-            console.log('Configurando grid a 100 filas...');
+            console.log('Configurando grid...');
             await page.evaluate(() => {
                 const grid = $('#grdAutorizaciones').data('kendoGrid');
                 if (grid) {
@@ -527,7 +528,7 @@ app.get('/consulta/autorizacion', async (req, res) => {
                         });
                     }
                 } catch (e) {
-                    console.log('Error extrayendo datos:', e);
+                    console.log('Error:', e);
                 }
                 
                 return resultados;
@@ -540,11 +541,11 @@ app.get('/consulta/autorizacion', async (req, res) => {
         const datos = await executeWithTimeout(
             scrapingTask(),
             CONFIG.maxTimeout,
-            'Tiempo máximo de consulta excedido'
+            'Timeout excedido'
         );
         
         const duration = ((Date.now() - startTime) / 1000).toFixed(2);
-        console.log(`✓ Completado en ${duration}s - ${datos.length} registros`);
+        console.log(`✓ Completado: ${duration}s - ${datos.length} registros`);
         
         if (datos.length === 0) {
             return res.status(404).json({ 
@@ -599,9 +600,7 @@ app.get('/diagnostico/test', async (req, res) => {
     const plataforma = req.query.plataforma || 'agendamientos';
     
     if (!['agendamientos', 'autorizaciones'].includes(plataforma)) {
-        return res.status(400).json({ 
-            error: 'Plataforma debe ser "agendamientos" o "autorizaciones"'
-        });
+        return res.status(400).json({ error: 'Plataforma inválida' });
     }
 
     const maxWaitTime = 10000;
@@ -612,10 +611,7 @@ app.get('/diagnostico/test', async (req, res) => {
     }
     
     if (browserInUse) {
-        return res.status(503).json({ 
-            error: 'Servicio ocupado',
-            retry_after_seconds: 5
-        });
+        return res.status(503).json({ error: 'Servicio ocupado' });
     }
 
     browserInUse = true;
@@ -625,9 +621,8 @@ app.get('/diagnostico/test', async (req, res) => {
 
     try {
         const config = ONTIMECAR_CONFIGS[plataforma];
-        logs.push(`[${new Date().toISOString()}] Test para: ${plataforma}`);
+        logs.push(`Test: ${plataforma}`);
         
-        logs.push('Obteniendo navegador...');
         const browser = await getBrowser();
         page = await browser.newPage();
         
@@ -635,50 +630,22 @@ app.get('/diagnostico/test', async (req, res) => {
         await page.setViewport({ width: 1366, height: 768 });
         
         page.on('console', msg => logs.push(`BROWSER: ${msg.text()}`));
-        page.on('pageerror', error => logs.push(`PAGE ERROR: ${error.message}`));
         
-        logs.push('Iniciando login...');
+        logs.push('Login...');
         await loginToOnTimeCar(page, config);
-        logs.push('✓ Login completado exitosamente');
+        logs.push('✓ Login OK');
         
-        logs.push(`Navegando a: ${config.targetUrl}`);
+        logs.push('Navegando...');
         await page.goto(config.targetUrl, { 
             waitUntil: 'domcontentloaded',
             timeout: CONFIG.navigationTimeout 
         });
-        logs.push('✓ Navegación completada');
-        
-        await page.waitForFunction(() => document.readyState === 'complete', { timeout: 5000 }).catch(() => {
-            logs.push('WARN: document.readyState no llegó a "complete"');
-        });
-        
-        if (plataforma === 'agendamientos') {
-            logs.push('Verificando DataTable...');
-            
-            const hasTable = await page.$(config.tableSelector);
-            logs.push(`- Selector tabla: ${hasTable ? '✓' : '✗'}`);
-            
-            const jQueryAvailable = await page.evaluate(() => typeof $ !== 'undefined');
-            logs.push(`- jQuery: ${jQueryAvailable ? '✓' : '✗'}`);
-            
-            if (jQueryAvailable) {
-                const dataTableAvailable = await page.evaluate(() => typeof $.fn.DataTable !== 'undefined');
-                logs.push(`- DataTable plugin: ${dataTableAvailable ? '✓' : '✗'}`);
-            }
-        } else {
-            logs.push('Verificando Kendo Grid...');
-            
-            const hasGrid = await page.$(config.tableSelector);
-            logs.push(`- Selector grid: ${hasGrid ? '✓' : '✗'}`);
-            
-            const kendoAvailable = await page.evaluate(() => typeof kendo !== 'undefined');
-            logs.push(`- Kendo UI: ${kendoAvailable ? '✓' : '✗'}`);
-        }
+        logs.push('✓ Navegación OK');
         
         await page.close();
         
         const duration = ((Date.now() - startTime) / 1000).toFixed(2);
-        logs.push(`✓ Test completado en ${duration}s`);
+        logs.push(`✓ Completado: ${duration}s`);
         
         res.json({
             success: true,
@@ -708,22 +675,23 @@ app.get('/diagnostico/test', async (req, res) => {
 });
 
 app.use((err, req, res, next) => {
-    res.status(500).json({ error: 'Error interno del servidor' });
+    res.status(500).json({ error: 'Error interno' });
 });
 
+// Iniciar servidor
 app.listen(PORT, () => {
     console.log(`
-╔══════════════════════════════════════════════════════════════════╗
-║       OnTimeCar Scraper v4.1 - ACTIVO (ES6 Modules)             ║
-╠══════════════════════════════════════════════════════════════════╣
-║  Puerto: ${PORT}                                                  ║
-╠══════════════════════════════════════════════════════════════════╣
-║  /consulta/agendamiento?numero_autorizacion=NUM                 ║
-║  /consulta/autorizacion?numero=NUM                              ║
-║  /diagnostico/test?plataforma=agendamientos                     ║
-║  /admin/reset-browser (POST)                                    ║
-║  /health                                                         ║
-╚══════════════════════════════════════════════════════════════════╝
+╔═══════════════════════════════════════════════════════════════╗
+║     OnTimeCar Scraper v4.2 - ACTIVO                          ║
+╠═══════════════════════════════════════════════════════════════╣
+║  Puerto: ${PORT}                                               ║
+╠═══════════════════════════════════════════════════════════════╣
+║  GET  /consulta/agendamiento?numero_autorizacion=NUM         ║
+║  GET  /consulta/autorizacion?numero=NUM                      ║
+║  GET  /diagnostico/test?plataforma=agendamientos             ║
+║  POST /admin/reset-browser                                   ║
+║  GET  /health                                                 ║
+╚═══════════════════════════════════════════════════════════════╝
     `);
 });
 
