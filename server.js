@@ -15,12 +15,12 @@ const CONFIG = {
     retryAttempts: 2,
     waitAfterSearch: 1500,
     waitAfterPagination: 2000,
-    defaultDaysBack: 30, // Por defecto traer último mes
+    defaultDaysBack: 30,
 };
 
 // Validar credenciales
 if (!process.env.ONTIMECAR_USERNAME || !process.env.ONTIMECAR_PASSWORD) {
-    console.error('❌ ERROR: Debes definir ONTIMECAR_USERNAME y ONTIMECAR_PASSWORD en el archivo .env');
+    console.error('ERROR: Debes definir ONTIMECAR_USERNAME y ONTIMECAR_PASSWORD en el archivo .env');
     process.exit(1);
 }
 
@@ -32,7 +32,6 @@ const ONTIMECAR_CONFIGS = {
         password: process.env.ONTIMECAR_PASSWORD,
         tableSelector: '#datatable',
         columnaAutorizacion: 12,
-        // Selectores correctos basados en el HTML
         fechaInicioSelector: '#start_date',
         fechaFinalSelector: '#end_date',
         botonBuscarSelector: '#dateFilterForm button[type="submit"]',
@@ -61,7 +60,7 @@ const MAX_CONCURRENT = 3;
 
 async function getBrowser() {
     if (!browser) {
-        console.log('🚀 Iniciando navegador...');
+        console.log('Iniciando navegador...');
         browser = await puppeteer.launch({
             headless: true,
             executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium',
@@ -110,7 +109,6 @@ async function withTimeout(promise, timeoutMs, errorMsg) {
     }
 }
 
-// Formatear fecha para el input (formato: YYYY-MM-DD o DD/MM/YYYY según la página)
 function formatDate(date, format = 'YYYY-MM-DD') {
     const d = new Date(date);
     const day = String(d.getDate()).padStart(2, '0');
@@ -123,7 +121,6 @@ function formatDate(date, format = 'YYYY-MM-DD') {
     return `${year}-${month}-${day}`;
 }
 
-// Calcular rango de fechas (por defecto último mes)
 function getDateRange(daysBack = CONFIG.defaultDaysBack) {
     const fechaFinal = new Date();
     const fechaInicio = new Date();
@@ -162,7 +159,7 @@ async function loginToOnTimeCar(page, config, attempt = 1) {
         await page.type('input[name="username"]', config.username, { delay: 50 });
         await page.type('input[name="password"]', config.password, { delay: 50 });
 
-        console.log('📝 Credenciales ingresadas, enviando...');
+        console.log('Credenciales ingresadas, enviando...');
 
         const navigationPromise = page.waitForNavigation({ 
             waitUntil: 'networkidle2',
@@ -188,14 +185,14 @@ async function loginToOnTimeCar(page, config, attempt = 1) {
             throw new Error('Login fallido: credenciales incorrectas o sesión no iniciada');
         }
 
-        console.log('✅ Login exitoso');
+        console.log('Login exitoso');
         return true;
 
     } catch (error) {
-        console.error(`❌ Error en login (intento ${attempt}):`, error.message);
+        console.error(`Error en login (intento ${attempt}):`, error.message);
         
         if (attempt < CONFIG.retryAttempts) {
-            console.log('⏳ Reintentando en 3 segundos...');
+            console.log('Reintentando en 3 segundos...');
             await sleep(3000);
             return loginToOnTimeCar(page, config, attempt + 1);
         }
@@ -209,15 +206,13 @@ async function loginToOnTimeCar(page, config, attempt = 1) {
 // ============================================
 async function aplicarFiltroDeFechas(page, config, fechaInicio, fechaFinal, dateFormat = 'YYYY-MM-DD') {
     try {
-        console.log(`📅 Aplicando filtro de fechas: ${formatDate(fechaInicio, dateFormat)} - ${formatDate(fechaFinal, dateFormat)}`);
+        console.log(`Aplicando filtro de fechas: ${formatDate(fechaInicio, dateFormat)} - ${formatDate(fechaFinal, dateFormat)}`);
         
-        // Esperar a que aparezcan los campos de fecha
         await page.waitForSelector(config.fechaInicioSelector, { 
             timeout: CONFIG.selectorTimeout,
             visible: true 
         });
         
-        // Limpiar y llenar fecha inicio
         await page.evaluate((selector) => {
             const input = document.querySelector(selector);
             if (input) input.value = '';
@@ -226,7 +221,6 @@ async function aplicarFiltroDeFechas(page, config, fechaInicio, fechaFinal, date
         await page.click(config.fechaInicioSelector, { clickCount: 3 });
         await page.type(config.fechaInicioSelector, formatDate(fechaInicio, dateFormat), { delay: 50 });
         
-        // Limpiar y llenar fecha final
         await page.evaluate((selector) => {
             const input = document.querySelector(selector);
             if (input) input.value = '';
@@ -237,36 +231,32 @@ async function aplicarFiltroDeFechas(page, config, fechaInicio, fechaFinal, date
         
         await sleep(500);
         
-        // Cambiar el selector de "length" para mostrar 100 registros por página
         if (config.lengthSelector) {
-            console.log('📊 Configurando para mostrar 100 registros por página...');
+            console.log('Configurando para mostrar 100 registros por página...');
             await page.waitForSelector(config.lengthSelector, { timeout: 5000 }).catch(() => {});
             await page.select(config.lengthSelector, '100').catch(() => {
-                console.log('⚠️ No se pudo cambiar el número de registros por página');
+                console.log('No se pudo cambiar el número de registros por página');
             });
             await sleep(1000);
         }
         
-        // Click en botón buscar y esperar resultados
-        console.log('🔍 Ejecutando búsqueda...');
+        console.log('Ejecutando búsqueda...');
         await page.click(config.botonBuscarSelector);
         
-        // Esperar a que la tabla se actualice con DataTables
         await sleep(CONFIG.waitAfterSearch);
         
-        // Esperar a que DataTables termine de procesar
         await page.waitForFunction(() => {
             const processing = document.querySelector('.dataTables_processing');
             return !processing || processing.style.display === 'none';
-        }, { timeout: 15000 }).catch(() => console.log('⚠️ Timeout esperando DataTables'));
+        }, { timeout: 15000 }).catch(() => console.log('Timeout esperando DataTables'));
         
         await sleep(1000);
         
-        console.log('✅ Filtro aplicado correctamente');
+        console.log('Filtro aplicado correctamente');
         return true;
         
     } catch (error) {
-        console.error('❌ Error aplicando filtro de fechas:', error.message);
+        console.error('Error aplicando filtro de fechas:', error.message);
         throw error;
     }
 }
@@ -280,7 +270,6 @@ async function extraerDatosDePagina(page, config) {
             timeout: CONFIG.selectorTimeout 
         });
         
-        // Esperar a que DataTables termine de procesar
         await page.waitForFunction(() => {
             const processing = document.querySelector('.dataTables_processing');
             return !processing || processing.style.display === 'none';
@@ -298,7 +287,6 @@ async function extraerDatosDePagina(page, config) {
             return filas.map((fila, index) => {
                 const celdas = Array.from(fila.querySelectorAll('td'));
                 
-                // Extraer datos según las columnas del HTML
                 const registro = {
                     fila_numero: index + 1,
                     acciones: celdas[0]?.innerText.trim() || '',
@@ -326,20 +314,19 @@ async function extraerDatosDePagina(page, config) {
                     celular_conductor: celdas[22]?.innerText.trim() || '',
                     observaciones: celdas[23]?.querySelector('input')?.value || celdas[23]?.innerText.trim() || '',
                     estado: celdas[24]?.innerText.trim() || '',
-                    // Color de fila para identificar estado
                     color_fila: window.getComputedStyle(fila).backgroundColor
                 };
                 
                 return registro;
-            }).filter(reg => reg.identificacion_usuario); // Filtrar filas vacías
+            }).filter(reg => reg.identificacion_usuario);
             
         }, config.tableSelector);
         
-        console.log(`📊 Extraídos ${datos.length} registros de la página actual`);
+        console.log(`Extraidos ${datos.length} registros de la página actual`);
         return datos;
         
     } catch (error) {
-        console.error('❌ Error extrayendo datos:', error.message);
+        console.error('Error extrayendo datos:', error.message);
         return [];
     }
 }
@@ -353,18 +340,15 @@ async function obtenerTodosPaginados(page, config) {
     let hayMasPaginas = true;
     
     while (hayMasPaginas) {
-        console.log(`\n📄 Procesando página ${paginaActual}...`);
+        console.log(`\nProcesando página ${paginaActual}...`);
         
-        // Extraer datos de la página actual
         const datosPagina = await extraerDatosDePagina(page, config);
         todosLosDatos.push(...datosPagina);
         
-        // Verificar información de paginación de DataTables
         const infoPaginacion = await page.evaluate(() => {
             const infoElement = document.querySelector('.dataTables_info');
             const info = infoElement ? infoElement.innerText : '';
             
-            // Extraer números del texto "Showing X to Y of Z entries"
             const match = info.match(/(\d+)\s+to\s+(\d+)\s+of\s+(\d+)/i);
             
             if (match) {
@@ -380,10 +364,9 @@ async function obtenerTodosPaginados(page, config) {
         });
         
         if (infoPaginacion) {
-            console.log(`📊 Mostrando ${infoPaginacion.desde}-${infoPaginacion.hasta} de ${infoPaginacion.total} registros totales`);
+            console.log(`Mostrando ${infoPaginacion.desde}-${infoPaginacion.hasta} de ${infoPaginacion.total} registros totales`);
             hayMasPaginas = infoPaginacion.hayMas;
         } else {
-            // Fallback: verificar si existe botón "Siguiente"
             hayMasPaginas = await page.evaluate((selector) => {
                 const paginacion = document.querySelector(selector);
                 if (!paginacion) return false;
@@ -394,9 +377,8 @@ async function obtenerTodosPaginados(page, config) {
         }
         
         if (hayMasPaginas) {
-            console.log('➡️  Navegando a siguiente página...');
+            console.log('Navegando a siguiente página...');
             
-            // Click en siguiente página
             const clickSuccess = await page.evaluate((selector) => {
                 const paginacion = document.querySelector(selector);
                 if (!paginacion) return false;
@@ -410,14 +392,12 @@ async function obtenerTodosPaginados(page, config) {
             }, config.paginacionSelector);
             
             if (!clickSuccess) {
-                console.log('⚠️ No se pudo hacer click en siguiente página');
+                console.log('No se pudo hacer click en siguiente página');
                 break;
             }
             
-            // Esperar a que se cargue la siguiente página
             await sleep(CONFIG.waitAfterPagination);
             
-            // Esperar a que DataTables termine de procesar
             await page.waitForFunction(() => {
                 const processing = document.querySelector('.dataTables_processing');
                 return !processing || processing.style.display === 'none';
@@ -427,15 +407,14 @@ async function obtenerTodosPaginados(page, config) {
             
             paginaActual++;
             
-            // Límite de seguridad (máximo 200 páginas = 20,000 registros si son 100 por página)
             if (paginaActual > 200) {
-                console.log('⚠️ Alcanzado límite de 200 páginas, deteniendo...');
+                console.log('Alcanzado límite de 200 páginas, deteniendo...');
                 break;
             }
         }
     }
     
-    console.log(`\n✅ Total de registros extraídos: ${todosLosDatos.length}`);
+    console.log(`\nTotal de registros extraídos: ${todosLosDatos.length}`);
     return todosLosDatos;
 }
 
@@ -460,11 +439,9 @@ async function scrapAgendamientosPorFechas(fechaInicio, fechaFinal, dateFormat =
         await page.setViewport({ width: 1920, height: 1080 });
         await page.setDefaultTimeout(CONFIG.maxTimeout);
         
-        // Login
         await loginToOnTimeCar(page, config);
         
-        // Navegar a página de agendamientos
-        console.log('🔗 Navegando a agendamientos...');
+        console.log('Navegando a agendamientos...');
         await page.goto(config.targetUrl, { 
             waitUntil: 'networkidle2',
             timeout: CONFIG.navigationTimeout 
@@ -472,10 +449,8 @@ async function scrapAgendamientosPorFechas(fechaInicio, fechaFinal, dateFormat =
         
         await sleep(3000);
         
-        // Aplicar filtro de fechas
         await aplicarFiltroDeFechas(page, config, fechaInicio, fechaFinal, dateFormat);
         
-        // Obtener todos los datos paginados
         const todosLosDatos = await obtenerTodosPaginados(page, config);
         
         const duration = ((Date.now() - startTime) / 1000).toFixed(2);
@@ -494,7 +469,7 @@ async function scrapAgendamientosPorFechas(fechaInicio, fechaFinal, dateFormat =
         };
         
     } catch (error) {
-        console.error('❌ Error en scraping de agendamientos:', error);
+        console.error('Error en scraping de agendamientos:', error);
         return {
             success: false,
             error: error.message,
@@ -519,7 +494,6 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
 
-// Health check
 app.get('/health', (req, res) => {
     res.json({
         status: 'ok',
@@ -531,7 +505,6 @@ app.get('/health', (req, res) => {
     });
 });
 
-// Endpoint principal: consultar agendamientos por rango de fechas
 app.post('/consulta/agendamientos-fechas', async (req, res) => {
     try {
         const { 
@@ -543,33 +516,28 @@ app.post('/consulta/agendamientos-fechas', async (req, res) => {
         
         let inicio, final;
         
-        // Si se proporciona diasAtras, calculamos el rango
         if (diasAtras) {
             const rango = getDateRange(parseInt(diasAtras));
             inicio = rango.inicio;
             final = rango.final;
-        } 
-        // Si se proporcionan fechas específicas
-        else if (fechaInicio && fechaFinal) {
+        } else if (fechaInicio && fechaFinal) {
             inicio = new Date(fechaInicio);
             final = new Date(fechaFinal);
-        } 
-        // Por defecto: último mes
-        else {
+        } else {
             const rango = getDateRange();
             inicio = rango.inicio;
             final = rango.final;
         }
         
-        console.log(`\n🚀 Nueva solicitud de agendamientos`);
-        console.log(`📅 Rango: ${inicio.toLocaleDateString()} - ${final.toLocaleDateString()}`);
+        console.log(`\nNueva solicitud de agendamientos`);
+        console.log(`Rango: ${inicio.toLocaleDateString()} - ${final.toLocaleDateString()}`);
         
         const resultado = await scrapAgendamientosPorFechas(inicio, final, dateFormat);
         
         res.json(resultado);
         
     } catch (error) {
-        console.error('❌ Error en endpoint:', error);
+        console.error('Error en endpoint:', error);
         res.status(500).json({
             success: false,
             error: error.message
@@ -577,7 +545,6 @@ app.post('/consulta/agendamientos-fechas', async (req, res) => {
     }
 });
 
-// Endpoint simplificado: último mes
 app.get('/consulta/agendamientos-mes', async (req, res) => {
     try {
         const rango = getDateRange(30);
@@ -591,7 +558,6 @@ app.get('/consulta/agendamientos-mes', async (req, res) => {
     }
 });
 
-// Endpoint para consultar hoy
 app.get('/consulta/agendamientos-hoy', async (req, res) => {
     try {
         const hoy = new Date();
@@ -603,37 +569,8 @@ app.get('/consulta/agendamientos-hoy', async (req, res) => {
             error: error.message
         });
     }
-});`);
-        console.log(`📅 Rango: ${inicio.toLocaleDateString()} - ${final.toLocaleDateString()}`);
-        
-        const resultado = await scrapAutorizacionesPorFechas(inicio, final, dateFormat);
-        
-        res.json(resultado);
-        
-    } catch (error) {
-        console.error('❌ Error en endpoint:', error);
-        res.status(500).json({
-            success: false,
-            error: error.message
-        });
-    }
 });
 
-// Endpoint simplificado: último mes
-app.get('/consulta/autorizaciones-mes', async (req, res) => {
-    try {
-        const rango = getDateRange(30);
-        const resultado = await scrapAutorizacionesPorFechas(rango.inicio, rango.final);
-        res.json(resultado);
-    } catch (error) {
-        res.status(500).json({
-            success: false,
-            error: error.message
-        });
-    }
-});
-
-// Estadísticas del sistema
 app.get('/admin/stats', (req, res) => {
     res.json({
         browser_initialized: browser !== null,
@@ -646,21 +583,21 @@ app.get('/admin/stats', (req, res) => {
 
 const server = app.listen(PORT, () => {
     console.log(`\n${'='.repeat(50)}`);
-    console.log(`🚀 Servidor OnTimeCar Scraper v6.0`);
-    console.log(`📡 Puerto: ${PORT}`);
-    console.log(`🌐 URL: http://localhost:${PORT}`);
+    console.log(`Servidor OnTimeCar Scraper v6.0`);
+    console.log(`Puerto: ${PORT}`);
+    console.log(`URL: http://localhost:${PORT}`);
     console.log(`${'='.repeat(50)}\n`);
     console.log(`Endpoints disponibles:`);
-    console.log(`  POST /consulta/autorizaciones-fechas`);
-    console.log(`  GET  /consulta/autorizaciones-mes`);
+    console.log(`  POST /consulta/agendamientos-fechas`);
+    console.log(`  GET  /consulta/agendamientos-mes`);
+    console.log(`  GET  /consulta/agendamientos-hoy`);
     console.log(`  GET  /health`);
     console.log(`  GET  /admin/stats`);
     console.log(`${'='.repeat(50)}\n`);
 });
 
-// Shutdown limpio
 async function gracefulShutdown(signal) {
-    console.log(`\n⚠️  ${signal} recibido, cerrando servidor...`);
+    console.log(`\n${signal} recibido, cerrando servidor...`);
     server.close(async () => {
         await closeBrowser();
         process.exit(0);
