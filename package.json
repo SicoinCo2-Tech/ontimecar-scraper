@@ -1,6 +1,7 @@
 {
   "name": "ontimecar-scraper",
   "version": "2.0.0",
+  "type": "module",
   "description": "Web scraper para OnTimeCar - Consulta por número de autorización",
   "main": "server.js",
   "scripts": {
